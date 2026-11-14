@@ -191,7 +191,7 @@ const taskQueue = new TaskQueue(DATA, {
     if (!p || !fs.existsSync(p.path)) throw new Error('پروژه پیدا نشد');
     const chat = store.newChat(p.id, '🌙 ' + job.text.replace(/\s+/g, ' ').slice(0, 44));
     broadcast({ type: 'chat', chat: store.chatSummary(chat) });
-    await orch.run(chat, p, job.text, job.mode);
+    await orch.run(chat, p, job.text, job.mode, { autoApprove: true }); // nobody is there to approve a plan at night
     const c = store.chat(chat.id);
     return { status: c ? c.status : 'done', chatId: chat.id };
   },

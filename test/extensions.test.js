@@ -125,7 +125,8 @@ test('plugins: a Claude Code plugin folder becomes sub-agents, skills, commands 
   w('agents/api-builder.md', '---\nname: api-builder\ndescription: Builds REST endpoints\n---\nYou build APIs.');
   w('skills/style/SKILL.md', '---\nname: style\ndescription: House style\n---\nUse tabs.');
   w('commands/ship.md', '---\ndescription: ship it\n---\nRun the tests then commit. $ARGUMENTS');
-  w('.mcp.json', JSON.stringify({ mcpServers: { db: { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/srv.js'], env: { DB_URL: '${DB_URL}' } }, free: { command: 'node', args: ['x.js'] } } }));
+  w('.mcp.json', JSON.stringify({ mcpServers: { db: { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/srv.js'], env: { DATABASE_URL: '${DB_URL}', MODE: 'ro' } }, free: { command: 'node', args: ['x.js'] },
+    api: { url: 'https://api.example.com/mcp', headers: { Authorization: 'Bearer ${API_KEY}' } } } }));
   const before = store.subagents().length;
   const rec = await pl.installDir(src);
   assert.equal(rec.name, 'acme-tools');
@@ -135,11 +136,17 @@ test('plugins: a Claude Code plugin folder becomes sub-agents, skills, commands 
   assert.equal(skills.all().length, 1);
   assert.deepEqual(pl.commands(), [{ title: '/ship', text: 'Run the tests then commit.', plugin: 'acme-tools' }]);
   const cs = cn.view().filter(c => c.plugin === rec.id);
-  assert.equal(cs.length, 2);
+  assert.equal(cs.length, 3);
+  assert.ok(cs.every(c => !c.enabled), 'plugin programs start switched off');
   const db = cs.find(c => /^db/.test(c.name));
-  assert.equal(db.enabled, false); assert.equal(db.secrets[0].name, 'DB_URL');
+  assert.equal(db.secrets[0].name, 'DB_URL');
   assert.ok(db.args[0].includes(rec.id) && !db.args[0].includes('CLAUDE_PLUGIN_ROOT'));
-  assert.equal(cs.find(c => /^free/.test(c.name)).enabled, true);
+  // env template: the variable is filled into the key the server expects; fixed values are kept
+  cn.save({ ...cn.get(db.id), values: { DB_URL: 'postgres://x' } });
+  assert.deepEqual(cn.resolved(cn.get(db.id)).env, { DATABASE_URL: 'postgres://x', MODE: 'ro' });
+  const api = cs.find(c => /^api/.test(c.name));
+  cn.save({ ...cn.get(api.id), values: { API_KEY: 'k1' } });
+  assert.deepEqual(cn.resolved(cn.get(api.id)).headers, { Authorization: 'Bearer k1' });
   pl.setEnabled(rec.id, false);
   assert.ok(store.subagents().filter(a => a.plugin === rec.id).every(a => !a.enabled));
   assert.deepEqual(pl.commands(), []);

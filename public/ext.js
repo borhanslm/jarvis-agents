@@ -95,7 +95,7 @@ function connectorsHtml() {
       <label class="switch" title="فعال/غیرفعال"><input type="checkbox" data-cntoggle="${esc(c.id)}" ${c.enabled ? 'checked' : ''}><span></span></label>
       <span class="ext-ic">${esc(c.icon || '🔌')}</span>
       <div class="ext-main"><b dir="auto">${esc(c.name)}</b>${c.plugin ? '<span class="pill">از پلاگین</span>' : ''}
-        <div class="help" dir="auto">${esc(c.desc || (c.type === 'http' ? c.url : [c.command, ...(c.args || [])].join(' ')))}</div>
+        <div class="help" dir="auto">${esc(c.desc || '')}</div><code class="cn-cmd" dir="ltr">${esc(c.type === 'http' ? c.url : [c.command, ...(c.args || [])].join(' '))}</code>
         <div class="ext-roles">${Object.keys(ROLE_FA).map(r => `<span class="role ${c.roles && c.roles[r] ? 'on' : ''}">${ROLE_FA[r]}</span>`).join('')}
           ${missing ? `<span class="warn">${ic('triangle-alert', 'sm')}مقدار لازم وارد نشده</span>` : ''}<span class="cn-test" id="cnt-${esc(c.id)}"></span></div></div>
       <div class="ext-acts">
@@ -150,7 +150,7 @@ function pluginsHtml() {
       <div class="ext-main"><b dir="ltr">${esc(p.name)}</b>${p.version ? `<span class="pill" dir="ltr">v${esc(p.version)}</span>` : ''}
         <div class="help" dir="auto">${esc(p.description || '')}</div>
         <div class="ext-roles">${p.subagents.length ? `<span class="role on">${fa(p.subagents.length)} ایجنت</span>` : ''}${p.skills.length ? `<span class="role on">${fa(p.skills.length)} اسکیل</span>` : ''}${(p.commands || []).length ? `<span class="role on">${fa(p.commands.length)} فرمان</span>` : ''}${p.connectors.length ? `<span class="role on">${fa(p.connectors.length)} اتصال‌دهنده</span>` : ''}
-          ${(p.needs || []).length ? `<span class="warn">${ic('triangle-alert', 'sm')}${fa(p.needs.length)} اتصال‌دهنده مقدار لازم دارد — در زبانه‌ی اتصال‌دهنده‌ها</span>` : ''}</div></div>
+          ${(() => { const off = (p.connectors || []).filter(id => { const c = (S.connectors || []).find(x => x.id === id); return c && !c.enabled; }).length; return off ? `<span class="warn">${ic('triangle-alert', 'sm')}${fa(off)} اتصال‌دهنده‌ی این پلاگین خاموش است — در زبانه‌ی اتصال‌دهنده‌ها فرمانش را ببینید و اگر به آن اعتماد دارید روشنش کنید</span>` : ''; })()}</div></div>
       <div class="ext-acts"><button type="button" class="btn small ghost danger" data-pldel="${esc(p.id)}">${ic('trash-2', 'sm')}حذف</button></div></div>`).join('')
     : '<div class="help empty-note">پلاگینی نصب نشده.</div>';
   return `<p class="help">${ic('info', 'sm')} پلاگین‌ها با همان قالب پلاگین‌های Claude Code هستند. ایجنت‌های پلاگین به تیم اضافه می‌شوند (بررسی‌کننده‌ها کنار تستر، بقیه کمک سازنده)، اسکیل‌هایش به آن‌ها وصل می‌شود، فرمان‌هایش بالای کادر پیام می‌آید و سرورهای MCP آن به اتصال‌دهنده‌ها اضافه می‌شوند.</p>
@@ -178,7 +178,7 @@ async function installPlugin(body, btn) {
       $('#plFilter').oninput = e => { const q = e.target.value.trim().toLowerCase(); document.querySelectorAll('.mk-row').forEach(x => { x.hidden = q && !x.dataset.mkname.includes(q); }); };
       return;
     }
-    toast(`پلاگین «${r.name}» نصب شد: ${fa(r.subagents.length)} ایجنت، ${fa(r.skills.length)} اسکیل، ${fa((r.commands || []).length)} فرمان، ${fa(r.connectors.length)} اتصال‌دهنده`);
+    toast(`پلاگین «${r.name}» نصب شد: ${fa(r.subagents.length)} ایجنت، ${fa(r.skills.length)} اسکیل، ${fa((r.commands || []).length)} فرمان، ${fa(r.connectors.length)} اتصال‌دهنده${r.connectors.length ? ' (اتصال‌دهنده‌ها خاموش‌اند تا خودتان روشنشان کنید)' : ''}`);
     if (btn && btn.dataset.plpick) { btn.textContent = 'نصب شد ✓'; return; }
     extDialog('plugins');
   } catch (err) { toast(err.message, true); }
