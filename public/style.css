@@ -603,3 +603,9 @@ textarea.rules, .field textarea.prose { font-family: var(--font-sans); direction
 .update-bar { position: fixed; bottom: var(--p-space-4); inset-inline-start: 50%; transform: translateX(50%); z-index: 250; display: flex; align-items: center; gap: var(--p-space-3); padding: var(--p-space-2) var(--p-space-3) var(--p-space-2) var(--p-space-4); border-radius: var(--p-radius-lg); border: 1px solid var(--color-primary-line); background: var(--color-surface-1); box-shadow: var(--shadow-lg); font-size: var(--text-sm); animation: rise var(--p-duration-base) var(--p-ease-out); }
 [dir="ltr"] .update-bar { transform: translateX(-50%); }
 .update-bar > .ic { color: var(--color-primary); }
+
+/* ---- connections ---- */
+.prov-row { display: flex; align-items: center; gap: var(--p-space-2); flex-wrap: wrap; padding: var(--p-space-1) 0; border-bottom: 1px dashed var(--color-border-subtle); }
+.prov-row b { color: var(--color-fg-strong); }
+.prov-row .btn { margin-inline-start: auto; }
+#pvOut { min-height: 1.4em; display: flex; align-items: center; gap: var(--p-space-1); flex-wrap: wrap; }

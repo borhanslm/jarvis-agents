@@ -65,6 +65,10 @@ async function claudeAuthMethod() {
   return method;
 }
 orch.authMethod = claudeAuthMethod;
+// Custom connections (DeepSeek, Kimi, GLM, OpenAI, …)
+const { Providers, PRESETS } = require('./lib/providers');
+const providers = new Providers(DATA, setup.secrets);
+orch.resolveProvider = spec => providers.resolve(spec);
 let claudeReadyCache = { at: 0, ok: false };
 async function claudeReady() {
   if (Date.now() - claudeReadyCache.at < 60000) return claudeReadyCache.ok;
@@ -238,6 +242,7 @@ async function api(req, res, url) {
       clis: { claude: !!agents.CLIS.claude, codex: !!agents.CLIS.codex },
       codexDefaultModel: agents.codexConfigModel(),
       claudeAuth: await claudeAuthMethod(),
+      providers: providers.view(), providerPresets: PRESETS,
       modelCatalog: { claude: require('./lib/models').CLAUDE },
       running: [...orch.running.keys()],
       queues: Object.fromEntries([...orch.running].map(([id, r]) => [id, r.inbox.length])),
@@ -252,6 +257,16 @@ async function api(req, res, url) {
     return send(res, 200, wasOff && out.requireToken ? { ...out, token: TOKEN } : out);
   }
 
+  if (parts[0] === 'providers') {
+    const done = out => { broadcast({ type: 'providers', providers: providers.view() }); return send(res, 200, out); };
+    try {
+      if (!parts[1] && m === 'GET') return send(res, 200, providers.view());
+      if (!parts[1] && m === 'POST') return done(providers.save(body || {}));
+      if (parts[1] === 'models' && m === 'POST') return send(res, 200, { models: await providers.models(body || {}) });
+      if (parts[1] === 'test' && m === 'POST') return send(res, 200, await providers.test(body || {}));
+      if (parts[1] && !parts[2] && m === 'DELETE') { providers.remove(parts[1]); return done({ ok: true }); }
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
   if (parts[0] === 'backup' && m === 'GET') return send(res, 200, store.backup());
   if (parts[0] === 'backup' && parts[1] === 'restore' && m === 'POST') {
     try { const n = store.restore(body.data); broadcast({ type: 'projects', projects: store.projects() }); return send(res, 200, { ok: true, ...n }); }

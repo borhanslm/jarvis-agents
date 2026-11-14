@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<title>JARVIS · Claude ⇄ Codex</title>
+<title>JARVIS</title>
 <!-- Everything is local: fonts, icons and three.js are bundled; no network requests. -->
 <script>
   // Apply the saved theme before first paint (no flash).
@@ -32,7 +32,7 @@
     </svg>
     <div class="brand-text">
       <span class="brand-name">JARVIS</span>
-      <span class="brand-sub">Claude می‌سازد · Codex تست می‌کند</span>
+      <span class="brand-sub" id="brandSub">تیم ایجنت‌های برنامه‌نویس</span>
     </div>
   </div>
 
@@ -193,7 +193,7 @@
 
         <div class="holo-greet">
           <h1 id="homeGreet">جارویس آماده‌ی خدمت است.</h1>
-          <p>Claude کد را می‌نویسد، Codex تحلیل و تست می‌کند و باگ‌ها را گزارش می‌دهد، و Claude آن‌ها را رفع می‌کند — تا وقتی Codex تأیید کند.</p>
+          <p id="homeRoles">سازنده کد را می‌نویسد، تستر تحلیل و تست می‌کند و باگ‌ها را گزارش می‌دهد، و سازنده آن‌ها را رفع می‌کند — تا وقتی تستر تأیید کند.</p>
         </div>
 
         <form class="command" id="homeCmd" autocomplete="off">
@@ -220,8 +220,8 @@
             <label title="Claude می‌نویسد، Codex تست می‌کند، Claude رفع می‌کند"><input type="radio" name="mode" value="team" checked><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-handshake" /></svg>تیمی</span></label>
             <label title="Codex اول پروژه را تحلیل و تست می‌کند، Claude باگ‌ها را رفع می‌کند"><input type="radio" name="mode" value="audit"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-scan-search" /></svg>بازرسی و رفع</span></label>
             <label title="Claude طرح می‌دهد، Codex نقد می‌کند، Claude طرح نهایی را می‌نویسد (بدون تغییر کد)"><input type="radio" name="mode" value="plan"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-map" /></svg>طراحی</span></label>
-            <label title="فقط Claude"><input type="radio" name="mode" value="claude"><span><i class="agent-dot claude" aria-hidden="true"></i>Claude</span></label>
-            <label title="فقط Codex (فقط خواندنی)"><input type="radio" name="mode" value="codex"><span><i class="agent-dot codex" aria-hidden="true"></i>Codex</span></label>
+            <label title="فقط سازنده، بدون بررسی"><input type="radio" name="mode" value="claude"><span><i class="agent-dot claude" aria-hidden="true"></i>فقط سازنده</span></label>
+            <label title="فقط تستر (فقط خواندنی)"><input type="radio" name="mode" value="codex"><span><i class="agent-dot codex" aria-hidden="true"></i>فقط تستر</span></label>
           </div>
           <div class="mentions" id="mentions" aria-label="صدا زدن مستقیم ساب‌ایجنت"></div>
           <div class="quick" id="quickPrompts" aria-label="فرمان‌های آماده"></div>
@@ -232,9 +232,9 @@
         <div class="composer-bottom">
           <div class="model-bar" id="modelBar" role="group" aria-label="مدل‌های این گفتگو" title="مدل‌های همین گفتگو — از اجرای بعدی اعمال می‌شود. Ctrl+Enter برای ارسال">
             <span class="mpick claude"><i class="agent-dot claude" aria-hidden="true"></i>
-              <select id="mClaude" aria-label="مدل Claude"></select><select id="mClaudeEffort" aria-label="میزان فکر Claude"></select></span>
+              <select id="mClaude" aria-label="مدل سازنده" title="سازنده"></select><select id="mClaudeEffort" aria-label="میزان فکر Claude"></select></span>
             <span class="mpick codex"><i class="agent-dot codex" aria-hidden="true"></i>
-              <select id="mCodex" aria-label="مدل Codex"></select><select id="mCodexEffort" aria-label="میزان فکر Codex"></select></span>
+              <select id="mCodex" aria-label="مدل تستر" title="تستر"></select><select id="mCodexEffort" aria-label="میزان فکر Codex"></select></span>
           </div>
           <div class="input-actions">
             <button type="button" class="icon-btn" id="btnAttach" aria-label="پیوست تصویر" title="پیوست تصویر — یا تصویر را بکشید یا Ctrl+V بزنید">

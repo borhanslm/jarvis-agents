@@ -134,6 +134,13 @@ function renderAgents() {
   $('#reactor').classList.toggle('busy', busy('claude') || busy('codex'));
   document.documentElement.classList.toggle('agents-busy', busy('claude') || busy('codex'));
   const orb = (n, role) => {
+    const ra = roleAgent(n === 'claude' ? 'builder' : 'reviewer');
+    if (ra.provider) {
+      const pv = ra.provider;
+      return `<div class="orb-head"><span class="orb-dot ${pv.hasKey ? 'on' : 'warn'}"></span><b>${esc(pv.name)}</b><span class="orb-state">${pv.hasKey ? 'اتصال API' : 'کلید ندارد'}</span></div>
+      <div class="orb-role">${n === 'claude' ? 'سازنده · کد را می‌نویسد و رفع می‌کند' : 'تستر · بررسی و تست می‌کند'}</div>
+      <div class="orb-model" dir="ltr">${esc(ra.model)}</div><div class="orb-act">${esc(pv.kind === 'openai' ? 'موتور Codex' : 'موتور Claude Code')}</div>`;
+    }
     const model = n === 'claude' ? prettyModel((S.settings || {}).builderModel) || 'Claude CLI' : prettyModel((S.settings || {}).codexModel || S.codexDefaultModel) || 'Codex CLI';
     const lim = a[n] && a[n].limitHit;
     const state = !S.clis[n] ? 'پیدا نشد' : (lim && lim.until) ? `منتظر سهمیه تا ${new Date(lim.until).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}` : busy(n) ? 'در حال کار' : (n === 'codex' && lim) ? 'سقف مصرف' : 'آماده';
@@ -143,7 +150,8 @@ function renderAgents() {
       <div class="orb-act">${busy(n) ? esc(a[n].last || '') : esc(v[n] || '')}</div>`;
   };
   homeEl('#orbClaude').innerHTML = orb('claude', 'سازنده · کد را می‌نویسد و رفع می‌کند');
-  homeEl('#orbCodex').innerHTML = orb('codex', 'تحلیلگر · بررسی و تست می‌کند');
+  homeEl('#orbCodex').innerHTML = orb('codex', 'تستر · بررسی و تست می‌کند');
+  renderRoles();
   homeEl('#orbClaude').classList.toggle('busy', busy('claude'));
   homeEl('#orbCodex').classList.toggle('busy', busy('codex'));
   const anyBusy = busy('claude') || busy('codex');
@@ -215,7 +223,7 @@ function appendMessage(m, scroll = true) {
 function buildMessage(m) {
   const d = document.createElement('div');
   const agent = m.agent || 'system';
-  const who = `<div class="who"><span class="tag ${agent}">${AGENT[agent] || agent}</span>${m.sub ? `<span class="tag sub">${esc(m.sub)}</span>` : ''}${m.via ? `<span class="via">↳ ساب‌ایجنت ${esc(m.via)}</span>` : ''}${m.round ? `<span>دور ${m.round}</span>` : ''}<span>${fmtTime(m.ts)}</span></div>`;
+  const who = `<div class="who"><span class="tag ${agent}" dir="auto">${m.name ? esc(m.name) : (AGENT[agent] || agent)}</span>${m.sub ? `<span class="tag sub">${esc(m.sub)}</span>` : ''}${m.via ? `<span class="via">↳ ساب‌ایجنت ${esc(m.via)}</span>` : ''}${m.round ? `<span>دور ${m.round}</span>` : ''}<span>${fmtTime(m.ts)}</span></div>`;
   switch (m.kind) {
     case 'phase':
       d.className = 'phase';
@@ -311,7 +319,7 @@ function buildReview(m, who) {
 // ---------- data flow ----------
 async function loadState() {
   const s = await api('/state');
-  Object.assign(S, { skills: s.skills || [], defaults: s.defaults || {}, queue: s.queues || {}, subagents: s.subagents || [], projects: s.projects, settings: s.settings, agents: s.agents, versions: s.versions, clis: s.clis, codexDefaultModel: s.codexDefaultModel, claudeAuth: s.claudeAuth || null, modelCatalog: (s.modelCatalog && s.modelCatalog.claude) || [] });
+  Object.assign(S, { skills: s.skills || [], defaults: s.defaults || {}, queue: s.queues || {}, subagents: s.subagents || [], projects: s.projects, settings: s.settings, agents: s.agents, versions: s.versions, clis: s.clis, codexDefaultModel: s.codexDefaultModel, claudeAuth: s.claudeAuth || null, providers: s.providers || [], providerPresets: s.providerPresets || [], modelCatalog: (s.modelCatalog && s.modelCatalog.claude) || [] });
   if (S.projectId && !S.projects.some(p => p.id === S.projectId)) S.projectId = null;
   if (!S.projectId && S.projects[0]) S.projectId = S.projects[0].id;
   S.chats = await api('/chats');
@@ -372,6 +380,7 @@ function connectEvents() {
         renderChats();
         break;
       case 'agents': S.agents = ev.agents; renderAgents(); break;
+      case 'providers': S.providers = ev.providers || []; renderAgents(); renderModelBar(); break;
       case 'preview': S.previews = S.previews || {}; S.previews[ev.projectId] = ev; if (S.previewOpen === ev.projectId) previewDialog(true); renderProjectInfo(); break;
       case 'usage': if (!S.chat && window.JarvisDash) window.JarvisDash.refresh(); break;
       case 'delta': case 'delta_reset': liveDelta(ev); break;
@@ -499,7 +508,7 @@ const SETTINGS_SCHEMA = [
     { k: 'reviewerEffort', t: 'select', l: 'میزان فکر تستر', o: EFFORTS },
     { k: 'specialistModel', t: 'model', m: 'claude', l: 'مدل ساب‌ایجنت‌های تستر (موتور Claude)', h: MODEL_HELP, ph: 'haiku' },
     { k: 'specialistEffort', t: 'select', l: 'میزان فکر ساب‌ایجنت‌ها', o: EFFORTS },
-    { k: 'codexModel', t: 'model', m: 'codex', l: 'مدل Codex', h: 'پیش‌فرض = مدل تنظیم‌شده در ~/.codex/config.toml' },
+    { k: 'codexModel', t: 'model', m: 'codex', l: 'مدل تستر اصلی (Codex یا یکی از اتصال‌ها)', h: 'پیش‌فرض = مدل تنظیم‌شده در ~/.codex/config.toml. اتصال‌هایی مثل DeepSeek هم اینجا هستند.' },
     { k: 'codexEffort', t: 'select', l: 'میزان فکر Codex', o: [['', 'پیش‌فرض'], ['minimal', 'minimal'], ['low', 'low'], ['medium', 'medium'], ['high', 'high']] },
   ] },
   { title: 'جریان کار تیمی', icon: 'handshake', fields: [
@@ -616,7 +625,7 @@ async function settingsDialog(scope) {
       }
       if (vals.notify && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission();
       if (!isProject && window.jarvisDesktop && window.jarvisDesktop.applySettings) window.jarvisDesktop.applySettings();
-      renderQuick();
+      renderQuick(); renderAgents(); renderModelBar();
       $('#dlg').close();
       toast(isProject ? `تنظیمات پروژه‌ی «${proj.name}» ذخیره شد` : 'ذخیره شد');
     } catch (err) { toast(err.message, true); }
@@ -1143,7 +1152,8 @@ async function setupDialog(opts = {}) {
   const claudeVia = { apiKey: 'با کلید API', 'claude.ai': 'با حساب Claude', console: 'با حساب Console' }[c.via] || 'متصل';
   const codexVia = { apiKey: 'با کلید API', chatgpt: 'با حساب ChatGPT' }[x.via] || 'متصل';
   const pending = n => st[n].login && !st[n].login.done;
-  dialog(`<h3>${ic('plug')}اتصال حساب‌ها</h3>
+  try { S.providers = await api('/providers'); } catch {}
+  dialog(`<h3>${ic('plug')}اتصال‌ها</h3>
     <p class="help">${ic('lock', 'sm')} همه‌چیز روی همین کامپیوتر می‌ماند. کلیدها ${st.encryptedSecrets ? 'با رمزنگاری ویندوز (DPAPI) ذخیره می‌شوند' : 'فقط روی همین کامپیوتر ذخیره می‌شوند'} و فقط به خودِ CLI داده می‌شوند.</p>
     <div class="wizard-steps">
       <div class="wz-item ${c.connected ? 'ok' : ''}">
@@ -1195,6 +1205,8 @@ async function setupDialog(opts = {}) {
         </div>
       </div>
 
+      ${providersBlock()}
+
       <div class="wz-item ${gfy.installed ? 'ok' : ''}">
         <div class="wz-icon">${ic(gfy.installed ? 'circle-check' : 'network')}</div>
         <div class="wz-body">
@@ -1212,6 +1224,8 @@ async function setupDialog(opts = {}) {
   const refresh = () => setupDialog(opts);
   try { localStorage.setItem('jarvis.setupSeen', '1'); } catch {}
   $('#wzRefresh').onclick = refresh;
+  body.querySelectorAll('[data-addprov]').forEach(b => b.onclick = () => providerDialog());
+  body.querySelectorAll('[data-editprov]').forEach(b => b.onclick = () => providerDialog(b.dataset.editprov));
   $('#wzDone').onclick = () => { clearTimeout(setupPoll); $('#dlg').close(); };
   body.querySelectorAll('[data-install]').forEach(b => b.onclick = async () => {
     try {
@@ -1257,6 +1271,8 @@ function claudeModels() { return (S.modelCatalog && S.modelCatalog.length) ? S.m
 function prettyModel(id) {
   if (!id) return '';
   const raw = String(id).trim(), low = raw.toLowerCase();
+  const pm = /^p:([a-z0-9-]+):(.+)$/.exec(raw);
+  if (pm) { const p = (S.providers || []).find(x => x.id === pm[1]); return `${p ? p.name : pm[1]} · ${pm[2]}`; }
   const k = claudeModels().find(([i]) => i === raw || i.split('-')[1] === low);
   if (k) return k[1];
   const c = raw.match(/^claude-([a-z]+)-(\d+)-(\d+)(?:-\d{8})?(\[1m\])?$/i);
@@ -1272,7 +1288,9 @@ function modelOptions(kind, value) {
   const base = kind === 'claude' ? claudeModels() : [];
   const def = kind === 'claude' ? 'پیش‌فرض CLI' : `پیش‌فرض · ${prettyModel(S.codexDefaultModel) || 'CLI'}`;
   const extra = [...cm[kind], value].filter(v => v && v !== '__custom' && !base.some(([i]) => i === v));
-  return [['', def], ...base, ...[...new Set(extra)].map(v => [v, prettyModel(v) === v ? v : `${prettyModel(v)} (${v})`]), ['__custom', 'سفارشی…']];
+  const conn = (S.providers || []).flatMap(p => p.models.map(m => [`p:${p.id}:${m}`, `${p.name} · ${m}`]));
+  const extra2 = extra.filter(v => !conn.some(([c]) => c === v));
+  return [['', def], ...base, ...conn, ...[...new Set(extra2)].map(v => [v, prettyModel(v) === v ? v : /^p:/.test(v) ? `${prettyModel(v)} (حذف‌شده)` : `${prettyModel(v)} (${v})`]), ['__custom', 'سفارشی…']];
 }
 const CLAUDE_MODELS = claudeModels;
 const CLAUDE_EFFORT = [['low', 'فکر: کم'], ['medium', 'فکر: متوسط'], ['high', 'فکر: زیاد'], ['xhigh', 'فکر: خیلی زیاد'], ['max', 'فکر: حداکثر']];
@@ -1303,6 +1321,7 @@ async function saveModelBar() {
   try {
     const r = await api(`/chats/${S.chat.id}/models`, { body: { models: readModelBar() } });
     S.chat.models = r.models;
+    renderAgents();
     lsSet('jarvis.models.last', r.models); // new chats start with the last choice
     if (r.running) toast('از اجرای بعدی اعمال می‌شود');
   } catch (e) { toast(e.message, true); renderModelBar(); }
@@ -1789,4 +1808,109 @@ if (window.jarvisDesktop && window.jarvisDesktop.onUpdate) {
     if (st.manual && st.state === 'latest') toast(UPDATE_TEXT.latest);
     if (st.manual && st.state === 'error') toast('بررسی به‌روزرسانی ناموفق بود: ' + (st.message || ''), true);
   });
+}
+
+// ---------- roles: who builds and who reviews (an account or a connection) ----------
+function roleAgent(role) {
+  const st = (S.chat && S.chat.models) ? { ...(S.settings || {}), ...Object.fromEntries(Object.entries(S.chat.models).filter(([, v]) => v)) } : (S.settings || {});
+  const spec = role === 'builder' ? st.builderModel : st.reviewer === 'claude' ? st.reviewerModel : st.codexModel;
+  const m = /^p:([a-z0-9-]+):(.+)$/.exec(spec || '');
+  if (m) { const p = (S.providers || []).find(x => x.id === m[1]); return { name: p ? p.name : m[1], model: m[2], provider: p || { id: m[1], name: m[1] + ' (حذف‌شده)', hasKey: false } }; }
+  if (role === 'builder') return { name: 'Claude', model: spec || '' };
+  return st.reviewer === 'claude' ? { name: 'Claude', model: spec || '' } : { name: 'Codex', model: spec || '' };
+}
+function renderRoles() {
+  const b = roleAgent('builder').name, r = roleAgent('reviewer').name;
+  const sub = document.getElementById('brandSub');
+  if (sub) sub.textContent = `${b} می‌سازد · ${r} تست می‌کند`;
+  const p = homeEl('#homeRoles');
+  if (p) p.textContent = `${b} کد را می‌نویسد، ${r} تحلیل و تست می‌کند و باگ‌ها را گزارش می‌دهد، و ${b} آن‌ها را رفع می‌کند — تا وقتی ${r} تأیید کند.`;
+}
+
+// ---------- connections (custom APIs: DeepSeek, Kimi, GLM, OpenAI, …) ----------
+function providersBlock() {
+  const list = S.providers || [];
+  const rows = list.map(p => `<div class="prov-row">
+      <span class="dot ${p.hasKey ? 'on' : 'warn'}"></span><b>${esc(p.name)}</b>
+      <span class="help">${p.kind === 'openai' ? 'OpenAI Responses · موتور Codex' : 'سازگار با Anthropic · موتور Claude Code'} · ${fa(p.models.length)} مدل${p.hasKey ? '' : ' · <span class="pi-warn">کلید ندارد</span>'}</span>
+      <button type="button" class="btn small ghost" data-editprov="${esc(p.id)}">${ic('pencil', 'sm')}ویرایش</button></div>`).join('');
+  return `<div class="wz-item ${list.some(p => p.hasKey) ? 'ok' : ''}">
+    <div class="wz-icon">${ic('globe')}</div>
+    <div class="wz-body">
+      <h4>اتصال‌های دیگر <small class="help">DeepSeek، Kimi، GLM، MiniMax، OpenAI و هر API سازگار</small></h4>
+      ${rows || '<div class="help">هنوز اتصالی اضافه نشده.</div>'}
+      <div class="row-gap"><button type="button" class="btn btn-primary btn-sm" data-addprov="1">${ic('plus')}افزودن اتصال</button></div>
+      <div class="wz-note">${ic('info', 'sm')}<span>بعد از افزودن، در «تنظیمات ← مدل‌ها» یا پایین کادر پیام، آن را برای <b>سازنده</b> یا <b>تستر</b> انتخاب کنید. هر ترکیبی کار می‌کند؛ مثلاً DeepSeek بسازد و Codex تست کند.</span></div>
+    </div></div>`;
+}
+
+async function providerDialog(id) {
+  const p = id ? (S.providers || []).find(x => x.id === id) : null;
+  const presets = S.providerPresets || [];
+  const pre = p ? presets.find(x => x.id === p.preset) : presets[0];
+  const v = p || { name: pre.name, kind: pre.kind, baseUrl: pre.baseUrl, models: pre.models, preset: pre.id };
+  dialog(`<div class="dlg-scroll"><h3>${ic('globe')}${p ? 'ویرایش اتصال — ' + esc(p.name) : 'افزودن اتصال'}</h3>
+    ${p ? '' : `<div class="field"><label for="pvPreset">سرویس</label><select id="pvPreset">${presets.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select></div>`}
+    <div class="field"><label for="pvName">نام (هر چه دوست دارید)</label><input id="pvName" value="${esc(v.name)}" dir="auto"></div>
+    <div class="field"><label>نوع API</label>
+      <label class="check"><input type="radio" name="pvKind" value="anthropic" ${v.kind !== 'openai' ? 'checked' : ''}> سازگار با Anthropic — با موتور Claude Code اجرا می‌شود (DeepSeek، Kimi، GLM، MiniMax)</label>
+      <label class="check"><input type="radio" name="pvKind" value="openai" ${v.kind === 'openai' ? 'checked' : ''}> سازگار با OpenAI Responses — با موتور Codex اجرا می‌شود (OpenAI)</label>
+      <div class="help" id="pvKindHelp"></div></div>
+    <div class="field"><label for="pvUrl">آدرس API (Base URL)</label><input id="pvUrl" dir="ltr" value="${esc(v.baseUrl)}" placeholder="https://api.example.com/anthropic"></div>
+    <div class="field"><label for="pvKey">کلید API <a href="#" id="pvKeyLink" hidden>گرفتن کلید ↗</a></label>
+      <input id="pvKey" type="password" dir="ltr" autocomplete="off" placeholder="${p && p.hasKey ? 'کلید ذخیره شده — برای تغییر، کلید جدید را وارد کنید' : 'sk-…'}">
+      <div class="help">${ic('lock', 'sm')} فقط روی همین کامپیوتر و رمزنگاری‌شده ذخیره می‌شود و فقط به همین سرویس فرستاده می‌شود. ورود Claude و ChatGPT شما هرگز به این سرویس داده نمی‌شود.</div></div>
+    <div class="field"><label for="pvModels">مدل‌ها (با کاما جدا کنید)</label><input id="pvModels" dir="ltr" value="${esc((v.models || []).join(', '))}" placeholder="deepseek-chat, deepseek-reasoner">
+      <div class="row-gap"><button type="button" class="btn small" id="pvFetch">${ic('refresh-cw', 'sm')}دریافت فهرست مدل‌ها</button><button type="button" class="btn small" id="pvTest">${ic('zap', 'sm')}آزمایش اتصال</button></div>
+      <div id="pvOut" class="help" role="status"></div></div>
+    </div>
+    <div class="dlg-actions"><button type="button" class="btn primary" id="pvSave">${ic('save', 'sm')}ذخیره</button>
+      ${p ? `<button type="button" class="btn danger" id="pvDel">${ic('trash-2', 'sm')}حذف</button>` : ''}
+      <button type="button" class="btn ghost" id="pvBack">بازگشت</button></div>`);
+  const preset = () => presets.find(x => x.id === (p ? p.preset : $('#pvPreset').value)) || {};
+  const kind = () => (document.querySelector('input[name=pvKind]:checked') || {}).value || 'anthropic';
+  const syncHelp = () => {
+    $('#pvKindHelp').textContent = kind() === 'openai'
+      ? 'فقط سرویس‌هایی که Responses API دارند. سرویس‌هایی که فقط Chat Completions دارند (مثل DeepSeek) از این راه کار نمی‌کنند؛ برای آن‌ها نوع Anthropic را انتخاب کنید.'
+      : 'سرویس باید API سازگار با Anthropic (/v1/messages) داشته باشد. DeepSeek، Kimi، GLM و MiniMax چنین آدرسی دارند.';
+    const pr = preset(); const l = $('#pvKeyLink');
+    l.hidden = !pr.keyUrl; l.onclick = e => { e.preventDefault(); if (pr.keyUrl) window.open(pr.keyUrl, '_blank'); };
+  };
+  syncHelp();
+  document.querySelectorAll('input[name=pvKind]').forEach(r => r.onchange = syncHelp);
+  if ($('#pvPreset')) $('#pvPreset').onchange = () => {
+    const pr = preset();
+    $('#pvName').value = pr.name === 'سفارشی' ? '' : pr.name; $('#pvUrl').value = pr.baseUrl || ''; $('#pvModels').value = (pr.models || []).join(', ');
+    document.querySelector(`input[name=pvKind][value=${pr.kind}]`).checked = true; syncHelp();
+  };
+  const form = () => ({ id: p ? p.id : undefined, preset: p ? p.preset : $('#pvPreset').value, name: $('#pvName').value, kind: kind(), baseUrl: $('#pvUrl').value.trim().replace(/\/+$/, ''), models: $('#pvModels').value, apiKey: $('#pvKey').value.trim() });
+  const out = (html, bad) => { $('#pvOut').innerHTML = html; $('#pvOut').className = 'help ' + (bad ? 'pi-bad' : ''); };
+  $('#pvFetch').onclick = async () => {
+    const f = form(); out('در حال دریافت…');
+    try { const r = await api('/providers/models', { body: { ...f, modelsUrl: preset().modelsUrl } }); $('#pvModels').value = r.models.slice(0, 40).join(', '); out(`${fa(r.models.length)} مدل پیدا شد${r.models.length > 40 ? ' (۴۰ تای اول گذاشته شد؛ بقیه را پاک کنید یا دستی بنویسید)' : ''}. مدل‌هایی را که لازم ندارید پاک کنید.`); }
+    catch (e) { out(esc(e.message), true); }
+  };
+  $('#pvTest').onclick = async () => {
+    const f = form(); const model = String(f.models).split(/[,،\n]/)[0].trim();
+    if (!model) return out('اول یک مدل بنویسید.', true);
+    out(`در حال آزمایش با <code dir="ltr">${esc(model)}</code>…`);
+    try {
+      const r = await api('/providers/test', { body: { ...f, model } });
+      out(r.ok ? `${ic('circle-check', 'sm')} اتصال برقرار است (${fa(r.ms)} میلی‌ثانیه).` : `${ic('circle-x', 'sm')} ${esc(r.hint || '')} <span dir="ltr">${esc(r.status ? r.status + ' — ' : '')}${esc(r.error || '')}</span>`, !r.ok);
+    } catch (e) { out(esc(e.message), true); }
+  };
+  $('#pvSave').onclick = async () => {
+    try {
+      const r = await api('/providers', { body: form() });
+      S.providers = await api('/providers');
+      toast(`اتصال «${r.name}» ذخیره شد${r.hasKey ? '' : ' — کلید API را هم وارد کنید'}`);
+      renderAgents(); renderModelBar();
+      setupDialog();
+    } catch (e) { out(esc(e.message), true); }
+  };
+  if ($('#pvDel')) $('#pvDel').onclick = async () => {
+    if (!confirm(`اتصال «${p.name}» و کلیدش حذف شود؟`)) return;
+    try { await api('/providers/' + p.id, { method: 'DELETE' }); S.providers = await api('/providers'); toast('حذف شد'); renderAgents(); renderModelBar(); setupDialog(); } catch (e) { toast(e.message, true); }
+  };
+  $('#pvBack').onclick = () => setupDialog();
 }

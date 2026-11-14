@@ -237,22 +237,24 @@ function providerData(data, S) {
   const claude = { model: 'claude', label: 'Claude', tokens: cl.reduce((t, m) => t + m.tokens, 0), costUsd: cl.reduce((t, m) => t + m.costUsd, 0), steps: cl.reduce((t, m) => t + m.steps, 0) };
   const codex = { model: 'codex', label: 'ChatGPT · Codex', tokens: cx.reduce((t, m) => t + m.tokens, 0),
     costUsd: cx.reduce((t, m) => t + (m.input * pIn + m.cacheRead * pC + m.output * pOut) / 1e6, 0), steps: cx.reduce((t, m) => t + m.steps, 0) };
+  const cu = sum('custom');
+  const custom = { model: 'custom', label: 'سایر اتصال‌ها', tokens: cu.reduce((t, m) => t + m.tokens, 0), costUsd: 0, steps: cu.reduce((t, m) => t + m.steps, 0) };
   const metric = D.metric === 'cost' && priced ? 'cost' : 'tokens';
-  return { rows: [claude, codex], metric, priced, total: { tokens: claude.tokens + codex.tokens, cost: claude.costUsd + codex.costUsd } };
+  return { rows: custom.tokens ? [claude, codex, custom] : [claude, codex], metric, priced, total: { tokens: claude.tokens + codex.tokens + custom.tokens, cost: claude.costUsd + codex.costUsd } };
 }
 function vsSection(data, S) {
   const vs = providerData(data, S);
   if (!vs.total.tokens) return '';
   const pro = S && S.claudeAuth === 'claude.ai';
   const val = r => vs.metric === 'cost' ? r.costUsd : r.tokens;
-  const tot = val(vs.rows[0]) + val(vs.rows[1]) || 1;
+  const tot = vs.rows.reduce((t, r) => t + val(r), 0) || 1;
   const note = D.metric === 'cost' && !vs.priced
     ? 'قیمت Codex در تنظیمات وارد نشده، پس این نمودار بر اساس توکن است. برای هزینه‌ی تخمینی ChatGPT، در «تنظیمات ← سرعت و هزینه» قیمت هر ۱ میلیون توکن را وارد کنید.'
     : vs.metric === 'cost' ? `هزینه‌ی ChatGPT از روی قیمت‌هایی که وارد کرده‌اید تخمین زده شده${pro ? '؛ هزینه‌ی Claude هم معادل API است (روی Pro پرداخت نمی‌شود)' : ''}.` : 'مقایسه بر اساس تعداد توکن.';
   return `<div class="charts vs">
     <section class="chart"><header><h3>Claude در برابر ChatGPT (Codex)</h3><small>${vs.metric === 'cost' ? 'هزینه' : 'توکن'}</small></header><div class="stage3d" id="cVs"></div></section>
     <section class="chart"><header><h3>خلاصه</h3></header>
-      <ul class="legend vs-legend">${vs.rows.map(r => `<li><i style="background:${r.model === 'claude' ? css('--color-claude') : css('--color-codex')}"></i><span>${r.label}</span>
+      <ul class="legend vs-legend">${vs.rows.map(r => `<li><i style="background:${r.model === 'claude' ? css('--color-claude') : r.model === 'custom' ? css('--color-sub') : css('--color-codex')}"></i><span>${r.label}</span>
         <b dir="ltr">${vs.metric === 'cost' ? (r.model === 'codex' || pro ? '≈' : '') + fmtUsd(r.costUsd) : fmtTok(r.tokens)}</b><em>${(val(r) / tot * 100).toLocaleString('fa-IR', { maximumFractionDigits: 1 })}٪</em></li>
         <li class="muted sub"><span>${fmtTok(r.tokens)} توکن · ${fa(r.steps)} مرحله${vs.metric !== 'cost' && r.costUsd ? ` · ≈${fmtUsd(r.costUsd)}` : ''}</span></li>`).join('')}</ul>
       <p class="help">${note}</p></section>
@@ -417,7 +419,7 @@ async function render() {
     D.stages.push(barsChart($('#cBars'), data, D.metric));
     D.stages.push(donutChart($('#cDonut'), data, D.metric));
     const vs = providerData(data, S);
-    if (vs.total.tokens) D.stages.push(donutChart($('#cVs'), { models: vs.rows }, vs.metric, m => m === 'claude' ? css('--color-claude') : css('--color-codex')));
+    if (vs.total.tokens) D.stages.push(donutChart($('#cVs'), { models: vs.rows }, vs.metric, m => m === 'claude' ? css('--color-claude') : m === 'custom' ? css('--color-sub') : css('--color-codex')));
   }
   if (proj) loadGraph(proj, gen);
 }
