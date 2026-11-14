@@ -70,6 +70,16 @@ const { Providers, PRESETS } = require('./lib/providers');
 const providers = new Providers(DATA, setup.secrets);
 orch.resolveProvider = spec => providers.resolve(spec);
 
+// ---- connectors (MCP servers) and plugins (Claude Code plugin format) ----
+const { Connectors, CATALOG: CONNECTOR_CATALOG } = require('./lib/connectors');
+const connectors = new Connectors(DATA, setup.secrets);
+orch.connectors = connectors;
+const { Plugins } = require('./lib/plugins');
+const plugins = new Plugins(DATA, { store, skills, connectors });
+orch.pluginSkills = () => plugins.all().filter(p => p.enabled && !p.subagents.length).flatMap(p => p.skills);
+const extState = () => ({ connectors: connectors.view(), plugins: plugins.all(), pluginCommands: plugins.commands() });
+const extChanged = () => { broadcast({ type: 'ext', ...extState() }); broadcast({ type: 'subagents', subagents: store.subagents() }); broadcast({ type: 'skills', skills: skills.all() }); };
+
 // ---- phone notifications (Bale / Telegram bot) when a run finishes ----
 const notify = require('./lib/notify');
 const STATUS_FA = { done: '✅ تمام شد', error: '❌ خطا', stopped: '⏹ متوقف شد', budget: '💰 سقف هزینه', 'needs-attention': '⚠️ نیاز به بررسی', unverified: '❔ تست‌نشده' };
@@ -171,6 +181,44 @@ setInterval(async () => {
     orch.run(chat, p, s.scheduleAuditPrompt, 'audit').catch(e => console.error('scheduled audit', e));
   }
 }, 30000).unref();
+
+// ---- task queue (overnight runs) ----
+const { TaskQueue } = require('./lib/queue');
+const taskQueue = new TaskQueue(DATA, {
+  onChange: jobs => broadcast({ type: 'queueJobs', jobs }),
+  runJob: async job => {
+    const p = store.project(job.projectId);
+    if (!p || !fs.existsSync(p.path)) throw new Error('پروژه پیدا نشد');
+    const chat = store.newChat(p.id, '🌙 ' + job.text.replace(/\s+/g, ' ').slice(0, 44));
+    broadcast({ type: 'chat', chat: store.chatSummary(chat) });
+    await orch.run(chat, p, job.text, job.mode);
+    const c = store.chat(chat.id);
+    return { status: c ? c.status : 'done', chatId: chat.id };
+  },
+  onBatchDone: async jobs => {
+    const s = store.settings();
+    const token = setup.secrets.get('notifyToken');
+    if (!s.notifyPhone || !token || !s.notifyChatId) return;
+    const ok = jobs.filter(j => j.status === 'done').length;
+    const lines = jobs.map(j => (STATUS_FA[j.status] || j.status) + ' — ' + j.text.replace(/\s+/g, ' ').slice(0, 60));
+    await notify.send({ channel: s.notifyPhone, token, chatId: s.notifyChatId, text: '🌙 صف کارهای جارویس تمام شد: ' + ok + ' از ' + jobs.length + ' موفق\n\n' + lines.join('\n') });
+  },
+});
+
+// Cost estimate for the next run in this mode: median of earlier finished runs, else a rough guess.
+function estimateRun(chat, mode) {
+  const costs = [];
+  for (const c of store.chats.values()) for (const mm of c.messages) {
+    const r = mm.kind === 'report' && mm.report;
+    if (r && r.mode === mode && r.status === 'done' && r.claudeUsd > 0) costs.push(r.claudeUsd);
+  }
+  costs.sort((a, b) => a - b);
+  if (costs.length >= 2) return { usd: +costs[Math.floor(costs.length / 2)].toFixed(3), basis: 'history', n: costs.length };
+  const s = { ...store.settings(chat.projectId), ...Object.fromEntries(Object.entries(chat.models || {}).filter(([, v]) => v)) };
+  const step = orch.stepCost(s.builderModel);
+  const guess = { team: step * 2.5, smart: step * 2, audit: step * 2, plan: step * 2, claude: step, codex: 0 }[mode];
+  return guess == null ? { usd: null } : { usd: +guess.toFixed(3), basis: 'guess' };
+}
 
 const cliPath = c => c ? (c.pre && c.pre.length ? c.pre[c.pre.length - 1] : c.cmd) : null;
 // Does this run use the user's own Claude account? (Not when connections fill the roles.)
@@ -294,7 +342,7 @@ async function api(req, res, url) {
       clis: { claude: !!agents.CLIS.claude, codex: !!agents.CLIS.codex },
       codexDefaultModel: agents.codexConfigModel(),
       claudeAuth: await claudeAuthMethod(),
-      providers: providers.view(), providerPresets: PRESETS,
+      providers: providers.view(), providerPresets: PRESETS, ...extState(), connectorCatalog: CONNECTOR_CATALOG, queueJobs: taskQueue.all(),
       modelCatalog: { claude: require('./lib/models').CLAUDE },
       running: [...orch.running.keys()],
       queues: Object.fromEntries([...orch.running].map(([id, r]) => [id, r.inbox.length])),
@@ -415,6 +463,37 @@ async function api(req, res, url) {
     if (parts[1] && m === 'DELETE') { store.deleteSubagent(parts[1]); done(); return send(res, 200, { ok: true }); }
   }
   if (parts[0] === 'discover' && m === 'GET') return send(res, 200, discover());
+
+  if (parts[0] === 'connectors') {
+    try {
+      if (!parts[1] && m === 'GET') return send(res, 200, connectors.view());
+      if (!parts[1] && m === 'POST') { const c = connectors.save(body || {}); extChanged(); return send(res, 200, c); }
+      if (parts[1] && parts[2] === 'test' && m === 'POST') return send(res, 200, await connectors.test(parts[1]));
+      if (parts[1] && parts[2] === 'toggle' && m === 'POST') { connectors.setEnabled(parts[1], !!body.enabled); extChanged(); return send(res, 200, { ok: true }); }
+      if (parts[1] && !parts[2] && m === 'DELETE') { connectors.remove(parts[1]); extChanged(); return send(res, 200, { ok: true }); }
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
+  if (parts[0] === 'plugins') {
+    try {
+      if (!parts[1] && m === 'GET') return send(res, 200, plugins.all());
+      if (parts[1] === 'discover' && m === 'GET') return send(res, 200, plugins.discover());
+      if (parts[1] === 'install' && m === 'POST') {
+        const r = body.dir ? plugins.installDir(String(body.dir)) : await plugins.installGit(String(body.url || ''), body.pick ? String(body.pick) : null);
+        if (!r.marketplace) extChanged();
+        return send(res, 200, r);
+      }
+      if (parts[1] && parts[2] === 'toggle' && m === 'POST') { plugins.setEnabled(parts[1], !!body.enabled); extChanged(); return send(res, 200, { ok: true }); }
+      if (parts[1] && !parts[2] && m === 'DELETE') { plugins.remove(parts[1]); extChanged(); return send(res, 200, { ok: true }); }
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
+  if (parts[0] === 'queue') {
+    try {
+      if (!parts[1] && m === 'GET') return send(res, 200, taskQueue.all());
+      if (!parts[1] && m === 'POST') return send(res, 200, taskQueue.add(body || {}));
+      if (parts[1] === 'clear' && m === 'POST') { taskQueue.clearFinished(); return send(res, 200, { ok: true }); }
+      if (parts[1] && m === 'DELETE') { taskQueue.remove(parts[1]); return send(res, 200, { ok: true }); }
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
 
   if (parts[0] === 'projects') {
     if (!parts[1] && m === 'POST') {
@@ -545,7 +624,7 @@ async function api(req, res, url) {
       const proj = store.project(chat.projectId);
       if (!proj) return send(res, 400, { error: 'پروژه‌ی این چت حذف شده' });
       if (chat.messages.length === 0 && chat.title === 'چت جدید') chat.title = text.replace(/\s+/g, ' ').slice(0, 48);
-      const mode = ['team', 'audit', 'plan', 'claude', 'codex', 'compact', 'memory'].includes(body.mode) ? body.mode : 'team';
+      const mode = ['team', 'smart', 'audit', 'plan', 'claude', 'codex', 'compact', 'memory'].includes(body.mode) ? body.mode : 'team';
       if (body.models) store.setChatModels(chat, body.models);
       // Every mode except "codex only" needs Claude; say so up front instead of failing mid-run.
       if (needsClaudeAccount(chat, mode) && !(await claudeReady())) {
@@ -556,6 +635,8 @@ async function api(req, res, url) {
       return send(res, 200, { ok: true });
     }
     if (parts[2] === 'stop' && m === 'POST') return send(res, 200, { ok: orch.stop(chat.id) });
+    if (parts[2] === 'smart-approve' && m === 'POST') return send(res, 200, { ok: orch.approveSmart(chat.id, { models: Array.isArray(body.models) ? body.models.map(String) : null }) });
+    if (parts[2] === 'estimate' && m === 'GET') return send(res, 200, estimateRun(chat, url.searchParams.get('mode') || 'team'));
     if (parts[2] === 'attach' && m === 'POST') {
       const ext = IMG_EXT[body.type];
       if (!ext) return send(res, 400, { error: 'فقط تصویر (png، jpg، gif، webp)' });

@@ -14,6 +14,7 @@
 <link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="holo.css">
+<link rel="stylesheet" href="ext.css">
 <link rel="stylesheet" href="skins.css">
 <link rel="icon" href="logo.svg" type="image/svg+xml">
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
@@ -43,6 +44,15 @@
   <div class="top-actions">
     <button class="icon-btn" id="btnPalette" type="button" aria-label="جستجو و فرمان" title="جستجو و فرمان (Ctrl+K)">
       <svg class="ic" aria-hidden="true"><use href="icons.svg#i-search" /></svg>
+    </button>
+    <button class="icon-btn" id="btnOps" type="button" aria-label="اتاق عملیات" title="اتاق عملیات — ایجنت‌ها را زنده و سه‌بعدی ببینید">
+      <svg class="ic" aria-hidden="true"><use href="icons.svg#i-radar" /></svg>
+    </button>
+    <button class="icon-btn badge-host" id="btnQueue" type="button" aria-label="صف کارها" title="صف کارها — چند کار را پشت سر هم یا شبانه اجرا کنید">
+      <svg class="ic" aria-hidden="true"><use href="icons.svg#i-clock" /></svg><span class="nbadge" id="queueBadge" hidden></span>
+    </button>
+    <button class="icon-btn" id="btnExt" type="button" aria-label="اتصال‌دهنده‌ها و پلاگین‌ها" title="اتصال‌دهنده‌ها (MCP) و پلاگین‌ها">
+      <svg class="ic" aria-hidden="true"><use href="icons.svg#i-puzzle" /></svg>
     </button>
     <button class="icon-btn" id="btnSkin" type="button" aria-label="ظاهر برنامه" title="ظاهر برنامه — ۱۲ مدل">
       <svg class="ic" aria-hidden="true"><use href="icons.svg#i-palette" /></svg>
@@ -221,6 +231,7 @@
         <div class="composer-top">
           <div class="modes" id="modes" role="radiogroup" aria-label="حالت کار">
             <label title="سازنده می‌نویسد، تستر تست می‌کند، سازنده رفع می‌کند"><input type="radio" name="mode" value="team" checked><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-handshake" /></svg>تیمی</span></label>
+            <label title="جارویس کار را به چند بخش تقسیم می‌کند و هر بخش را با مدل مناسب (و ارزان‌تر) انجام می‌دهد، بعد تستر کل کار را بررسی می‌کند"><input type="radio" name="mode" value="smart"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-sparkles" /></svg>هوشمند</span></label>
             <label title="تستر اول پروژه را تحلیل و تست می‌کند، سازنده باگ‌ها را رفع می‌کند"><input type="radio" name="mode" value="audit"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-scan-search" /></svg>بازرسی و رفع</span></label>
             <label title="سازنده طرح می‌دهد، تستر نقد می‌کند، سازنده طرح نهایی را می‌نویسد (بدون تغییر کد)"><input type="radio" name="mode" value="plan"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-map" /></svg>طراحی</span></label>
             <label title="فقط سازنده، بدون بررسی"><input type="radio" name="mode" value="claude"><span><i class="agent-dot claude" aria-hidden="true"></i>فقط سازنده</span></label>
@@ -240,6 +251,7 @@
             <span class="mpick codex"><i class="agent-dot codex" aria-hidden="true"></i>
               <select id="mCodex" aria-label="مدل تستر" title="تستر"></select><select id="mCodexEffort" aria-label="میزان فکر تستر"></select></span>
           </div>
+          <span class="estimate" id="estimate" hidden></span>
           <div class="input-actions">
             <button type="button" class="icon-btn" id="btnAttach" aria-label="پیوست تصویر" title="پیوست تصویر — یا تصویر را بکشید یا Ctrl+V بزنید">
               <svg class="ic" aria-hidden="true"><use href="icons.svg#i-paperclip" /></svg>
@@ -265,6 +277,8 @@
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 <script src="skins.js"></script>
 <script src="app.js"></script>
+<script src="ext.js"></script>
+<script type="module" src="ops3d.js"></script>
 <script type="module" src="dashboard.js"></script>
 </body>
 </html>

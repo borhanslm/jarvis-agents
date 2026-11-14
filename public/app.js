@@ -205,9 +205,25 @@ function renderStream() {
   if (!S.chat) { st.appendChild(welcomeEl); st.scrollTop = 0; window.JarvisDash && window.JarvisDash.show(); return; }
   window.JarvisDash && window.JarvisDash.hide();
   if (!S.chat.messages.length) st.innerHTML = `<div class="welcome"><p>دستور اول را بنویسید. در حالت «تیمی»، ${esc(roleAgent('builder').name)} کد را می‌نویسد و ${esc(roleAgent('reviewer').name)} تست و بررسی می‌کند تا همه‌چیز درست شود.</p></div>`;
-  for (const m of S.chat.messages) appendMessage(m, false);
-  st.scrollTop = st.scrollHeight;
+  const msgs = S.chat.messages;
+  const from = Math.max(0, msgs.length - (S.renderLimit || RENDER_PAGE));
+  if (from > 0) {
+    const more = document.createElement('div');
+    more.className = 'sys load-older';
+    more.innerHTML = `<button type="button" class="btn small ghost" id="btnOlder">${ic('arrow-up', 'sm')}نمایش ${fa(Math.min(from, RENDER_PAGE))} پیام قدیمی‌تر (${fa(from)} پیام پنهان)</button>`;
+    st.appendChild(more);
+    more.querySelector('button').onclick = () => {
+      const h = st.scrollHeight;
+      S.renderLimit = (S.renderLimit || RENDER_PAGE) + RENDER_PAGE;
+      renderStream(true);
+      st.scrollTop = st.scrollHeight - h;
+    };
+  }
+  // Results of tools whose call is hidden are skipped with it.
+  for (let i = from; i < msgs.length; i++) appendMessage(msgs[i], false);
+  if (!arguments[0]) st.scrollTop = st.scrollHeight;
 }
+const RENDER_PAGE = 300;
 const welcomeEl = $('#welcome');
 // Home-screen nodes live inside #welcome, which is detached while a chat is open.
 const homeEl = sel => welcomeEl.querySelector(sel);
@@ -261,7 +277,7 @@ function buildMessage(m) {
       if (!firstLine) firstLine = (input || '').split('\n').find(l => l.trim()) || '';
       if (m.via) d.classList.add('nested');
       if (m.delegate) firstLine = `→ ${m.delegate}: ` + firstLine;
-      d.innerHTML = `<details class="tool" data-tool="${esc(m.id || '')}"><summary>${ic(m.delegate ? 'bot' : /^(Bash|PowerShell|shell)$/.test(m.name) ? 'terminal' : /^(Read|Glob|Grep)$/.test(m.name) ? 'file-text' : /^(Edit|Write|MultiEdit|file_change)$/.test(m.name) ? 'pencil' : 'wrench', 'sm')}<span class="tag ${agent}">${agent === 'claude' ? 'Claude' : 'Codex'}</span><span class="tname">${esc(m.name)}</span><span class="tin">${esc(firstLine.slice(0, 200))}</span><span class="res"></span></summary><pre>${esc(input)}</pre></details>`;
+      d.innerHTML = `<details class="tool" data-tool="${esc(m.id || '')}"><summary>${ic(m.delegate ? 'bot' : /^(Bash|PowerShell|shell)$/.test(m.name) ? 'terminal' : /^(Read|Glob|Grep)$/.test(m.name) ? 'file-text' : /^(Edit|Write|MultiEdit|file_change)$/.test(m.name) ? 'pencil' : 'wrench', 'sm')}<span class="tag ${agent}">${AGENT[agent] || agent}</span><span class="tname">${esc(m.name)}</span><span class="tin">${esc(firstLine.slice(0, 200))}</span><span class="res"></span></summary><pre>${esc(input)}</pre></details>`;
       return d;
     }
     case 'tool_result': {
@@ -289,6 +305,7 @@ function buildMessage(m) {
         ${t.output ? `<details ${t.ok ? '' : 'open'}><summary>خروجی</summary><pre dir="ltr">${esc(t.output)}</pre></details>` : ''}</div>`;
       return d;
     }
+    case 'smartplan': return window.buildSmartPlan ? buildSmartPlan(m) : null;
     case 'summary':
       d.className = 'msg system';
       d.innerHTML = `<div class="sumcard"><div class="tc-head">${ic('layers')}<b>خلاصه‌ی گفتگو</b><span class="help">از اینجا ایجنت‌ها با نشست تازه و همین خلاصه ادامه می‌دهند.</span></div><div class="md">${md(m.text)}</div></div>`;
@@ -344,7 +361,9 @@ async function loadState() {
   Object.assign(S, { skills: s.skills || [], defaults: s.defaults || {}, queue: s.queues || {}, subagents: s.subagents || [], projects: s.projects, settings: s.settings, agents: s.agents, versions: s.versions, clis: s.clis, codexDefaultModel: s.codexDefaultModel, claudeAuth: s.claudeAuth || null, providers: s.providers || [], providerPresets: s.providerPresets || [], modelCatalog: (s.modelCatalog && s.modelCatalog.claude) || [] });
   if (S.projectId && !S.projects.some(p => p.id === S.projectId)) S.projectId = null;
   if (!S.projectId && S.projects[0]) S.projectId = S.projects[0].id;
+  Object.assign(S, { connectors: s.connectors || [], plugins: s.plugins || [], pluginCommands: s.pluginCommands || [], connectorCatalog: s.connectorCatalog || [], queueJobs: s.queueJobs || [] });
   S.chats = await api('/chats');
+  if (window.renderExtBadges) renderExtBadges();
   renderProjects(); renderAgents(); renderSubagents(); renderChats(); renderProjectInfo(); renderQuick();
   const last = localStorage.getItem('jarvis.chat');
   if (last && S.chats.some(c => c.id === last && c.projectId === S.projectId)) openChat(last);
@@ -357,6 +376,7 @@ function selectProject(id) {
 }
 async function openChat(id) {
   S.chat = await api('/chats/' + id);
+  S.renderLimit = 0;
   localStorage.setItem('jarvis.chat', id);
   renderChats(); renderChatHead(); renderStream(); renderModelBar(); renderQuick(); clearAttachments(); renderPresets();
   $('#sidebar').classList.remove('open');
@@ -381,6 +401,7 @@ function connectEvents() {
   es.onopen = () => { if (S.liveLost) { S.liveLost = false; toast('اتصال زنده دوباره برقرار شد'); loadState().catch(() => {}); } };
   es.onmessage = e => {
     const ev = JSON.parse(e.data);
+    window.dispatchEvent(new CustomEvent('jarvis:ev', { detail: ev })); // ops room, etc.
     switch (ev.type) {
       case 'message':
         if (S.chat && S.chat.id === ev.chatId) {
@@ -413,6 +434,14 @@ function connectEvents() {
       case 'projects': S.projects = ev.projects; renderProjects(); break;
       case 'queue': S.queue[ev.chatId] = ev.pending; if (S.chat && S.chat.id === ev.chatId) renderChatHead(); break;
       case 'finished': onFinished(ev); break;
+      case 'msgUpdate':
+        if (S.chat && S.chat.id === ev.chatId) {
+          const i = S.chat.messages.findIndex(x => x.id === ev.message.id);
+          if (i >= 0) { S.chat.messages[i] = ev.message; const st = $('#stream'), top = st.scrollTop; renderStream(); st.scrollTop = top; }
+        }
+        break;
+      case 'ext': Object.assign(S, { connectors: ev.connectors || [], plugins: ev.plugins || [], pluginCommands: ev.pluginCommands || [] }); renderQuick(); if (window.onExtChanged) onExtChanged(); break;
+      case 'queueJobs': S.queueJobs = ev.jobs || []; if (window.onQueueChanged) onQueueChanged(); break;
       case 'hello': break;
     }
   };
@@ -432,7 +461,7 @@ function onFinished(ev) {
     new Notification('JARVIS', { body: msg });
   }
   if (S.settings.speak && 'speechSynthesis' in window) {
-    const u = new SpeechSynthesisUtterance(ev.status === 'done' ? 'کار تمام شد. کدکس تأیید کرد.' : 'کار متوقف شد. لطفاً بررسی کنید.');
+    const u = new SpeechSynthesisUtterance(ev.status === 'done' ? 'کار تمام شد و تستر تأیید کرد.' : 'کار متوقف شد. لطفاً بررسی کنید.');
     u.lang = 'fa-IR';
     speechSynthesis.speak(u);
   }
@@ -535,6 +564,13 @@ const SETTINGS_SCHEMA = [
     { k: 'specialistEffort', t: 'select', l: 'میزان فکر ساب‌ایجنت‌ها', o: EFFORTS },
     { k: 'codexModel', t: 'model', m: 'codex', l: 'مدل تستر اصلی (Codex یا یکی از اتصال‌ها)', h: 'پیش‌فرض = مدل تنظیم‌شده در ~/.codex/config.toml. اتصال‌هایی مثل DeepSeek هم اینجا هستند.' },
     { k: 'codexEffort', t: 'select', l: 'میزان فکر Codex', o: [['', 'پیش‌فرض'], ['minimal', 'minimal'], ['low', 'low'], ['medium', 'medium'], ['high', 'high']] },
+  ] },
+  { title: 'حالت هوشمند', icon: 'sparkles', fields: [
+    { k: 'routerModel', t: 'model', m: 'claude', l: 'برنامه‌ریز (تقسیم کار)', h: 'یک مدل ارزان و سریع پیام را می‌خواند و کار را به چند بخش با سطح سختی تقسیم می‌کند.' },
+    { k: 'routeHard', t: 'model', m: 'claude', l: 'بخش‌های سخت (طراحی، الگوریتم، امنیت)' },
+    { k: 'routeMedium', t: 'model', m: 'claude', l: 'بخش‌های متوسط (کد معمولی و رفع باگ)', h: 'رفع باگ‌های گزارش‌شده‌ی تستر هم با همین مدل انجام می‌شود.' },
+    { k: 'routeEasy', t: 'model', m: 'claude', l: 'بخش‌های ساده (تست، مستندات، تنظیمات)' },
+    { k: 'smartAutoApprove', t: 'bool', l: 'برنامه‌ی تقسیم کار خودکار اجرا شود', h: 'خاموش باشد، قبل از شروع کارت برنامه را نشان می‌دهد تا مدل هر بخش را عوض یا تأیید کنید.' },
   ] },
   { title: 'تست‌های پروژه', icon: 'list-checks', fields: [
     { k: 'testCommand', t: 'text', ltr: 1, ph: 'auto', l: 'دستور تست پروژه (auto = تشخیص خودکار، خالی = خاموش)', h: 'جارویس بعد از هر دور، تست‌های خود پروژه را اجرا می‌کند و نتیجه را به تستر می‌دهد. مثلاً auto، npm test یا python -m pytest. بهتر است در «تنظیمات پروژه» بگذارید.' },
@@ -1583,7 +1619,7 @@ function quickItems() {
   return ((S.settings && S.settings.savedPrompts) || []).map(line => {
     const m = line.match(/^([^:：]{1,30})[:：]\s*(.+)$/);
     return m ? { title: m[1].trim(), text: m[2].trim() } : { title: line.length > 28 ? line.slice(0, 27) + '…' : line, text: line };
-  });
+  }).concat((S.pluginCommands || []).map(c => ({ title: c.title, text: c.text })));
 }
 function renderQuick() {
   const box = $('#quickPrompts');
@@ -1617,6 +1653,9 @@ function paletteItems() {
     { icon: 'archive', label: 'پشتیبان‌گیری و بازگردانی', run: backupDialog },
     { icon: 'folder-plus', label: 'افزودن پروژه', run: () => addProjectDialog() },
     { icon: 'palette', label: 'ظاهر برنامه (۱۲ مدل)', run: skinDialog },
+    { icon: 'puzzle', label: 'اتصال‌دهنده‌ها و پلاگین‌ها', run: () => extDialog('connectors') },
+    { icon: 'clock', label: 'صف کارها (اجرای شبانه)', run: () => queueDialog() },
+    { icon: 'radar', label: 'اتاق عملیات سه‌بعدی', run: () => window.openOps && openOps() },
     { icon: 'sun', label: 'تغییر تم', run: () => $('#btnTheme').click() },
   ].filter(Boolean).map(a => ({ ...a, kind: 'فرمان' }));
   const projs = S.projects.map(x => ({ icon: 'folder', label: x.name, sub: x.path, kind: 'پروژه', run: () => selectProject(x.id) }));
