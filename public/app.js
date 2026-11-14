@@ -192,9 +192,9 @@ function renderChatHead() {
   const pending = S.queue[c.id] || 0;
   $('#btnSend').disabled = false;
   $('#btnSend').innerHTML = running ? `${ic('inbox')}<span>به صف${pending ? ` (${pending.toLocaleString('fa-IR')})` : ''}</span>` : `${ic('send', 'flip-rtl')}<span>ارسال</span>`;
-  $('#btnSend').title = running ? 'تیم در حال کار است؛ پیام شما در مرحله‌ی بعدیِ Claude به او تحویل داده می‌شود' : '';
+  $('#btnSend').title = running ? 'تیم در حال کار است؛ پیام شما در مرحله‌ی بعدیِ سازنده به او تحویل داده می‌شود' : '';
   $('#input').placeholder = running
-    ? 'تیم در حال کار است — هر دستور یا اصلاحی دارید بنویسید؛ در مرحله‌ی بعد به Claude می‌رسد…'
+    ? 'تیم در حال کار است — هر دستور یا اصلاحی دارید بنویسید؛ در مرحله‌ی بعد به سازنده می‌رسد…'
     : 'به جارویس بگویید چه بسازد یا چه چیزی را بررسی کند…';
   $('#composer').classList.toggle('queueing', running);
 }
@@ -203,7 +203,7 @@ function renderStream() {
   st.innerHTML = '';
   if (!S.chat) { st.appendChild(welcomeEl); st.scrollTop = 0; window.JarvisDash && window.JarvisDash.show(); return; }
   window.JarvisDash && window.JarvisDash.hide();
-  if (!S.chat.messages.length) st.innerHTML = '<div class="welcome"><p>دستور اول را بنویسید. در حالت «تیمی»، Claude کد را می‌نویسد و Codex تست و بررسی می‌کند تا همه‌چیز درست شود.</p></div>';
+  if (!S.chat.messages.length) st.innerHTML = `<div class="welcome"><p>دستور اول را بنویسید. در حالت «تیمی»، ${esc(roleAgent('builder').name)} کد را می‌نویسد و ${esc(roleAgent('reviewer').name)} تست و بررسی می‌کند تا همه‌چیز درست شود.</p></div>`;
   for (const m of S.chat.messages) appendMessage(m, false);
   st.scrollTop = st.scrollHeight;
 }
@@ -680,8 +680,8 @@ function buildReport(m) {
     <div class="rgrid">
       <div><span>زمان</span><b>${dur}</b></div>
       <div><span>دورها</span><b>${n(r.rounds)}</b></div>
-      <div><span>هزینه‌ی Claude</span><b dir="ltr">$${(r.claudeUsd || 0).toFixed(3)}</b></div>
-      <div><span>توکن Codex</span><b>${n(r.codexTokens)}</b></div>
+      <div><span>هزینه (تخمینی)</span><b dir="ltr">$${(r.claudeUsd || 0).toFixed(3)}</b></div>
+      <div><span>توکن موتور Codex</span><b>${n(r.codexTokens)}</b></div>
       <div><span>فایل‌های تغییرکرده</span><b>${n((r.files || []).length)}</b></div>
       ${r.openBugs ? `<div><span>باگ باز</span><b class="bad">${n(r.openBugs)}</b></div>` : ''}
     </div>
@@ -873,7 +873,7 @@ $('#btnDiff').onclick = diffDialog;
 $('#btnExport').onclick = exportChat;
 $('#btnStop').onclick = () => S.chat && api(`/chats/${S.chat.id}/stop`, { body: {} });
 $('#btnReset').onclick = async () => {
-  if (!S.chat || !confirm('حافظه‌ی گفتگوی Claude و Codex برای این چت پاک شود و نشست تازه شروع شود؟')) return;
+  if (!S.chat || !confirm('حافظه‌ی گفتگوی سازنده و تستر برای این چت پاک شود و نشست تازه شروع شود؟')) return;
   await api(`/chats/${S.chat.id}/reset`, { body: {} });
   toast('دفعه‌ی بعد هر دو ایجنت با نشست تازه شروع می‌کنند');
 };
@@ -926,7 +926,7 @@ $('#composer').onsubmit = async e => {
     $('#input').value = '';
     pushHistory(text);
     if (!running) clearAttachments();
-    if (r.queued) toast('در صف قرار گرفت — در مرحله‌ی بعد به Claude می‌رسد');
+    if (r.queued) toast('در صف قرار گرفت — در مرحله‌ی بعد به سازنده می‌رسد');
   } catch (err) {
     toast(err.message, true);
     if (err.data && err.data.needSetup) setupDialog(); // Claude not connected yet
@@ -989,13 +989,13 @@ function subagentDialog(a, draft) {
     <div class="field-row">
       <div class="field"><label>نقش</label>
         <select id="aStage">
-          <option value="review">تستر موازی — هر دور بررسی، کنار Codex اجرا می‌شود و باگ‌هایش به لیست رفع اضافه می‌شود</option>
-          <option value="builder">کمکِ سازنده — Claude هنگام نوشتن کد می‌تواند کار را به او بسپارد</option>
+          <option value="review">تستر موازی — هر دور، کنار تستر اصلی بررسی می‌کند و باگ‌هایش به لیست رفع اضافه می‌شود</option>
+          <option value="builder">کمکِ سازنده — سازنده هنگام نوشتن کد می‌تواند کار را به او بسپارد</option>
         </select></div>
       <div class="field" style="flex:1 1 220px"><label>اجرا با</label>
         <select id="aModel" dir="auto">${subRunnerOptions(v).map(([val, lab]) => `<option value="${esc(val)}">${esc(lab)}</option>`).join('')}</select></div>
     </div>
-    <div class="field"><label>توضیح کوتاه (برای «کمکِ سازنده»: Claude از روی این تصمیم می‌گیرد کی صدایش کند)</label><input id="aDesc" value="${esc(v.description)}"></div>
+    <div class="field"><label>توضیح کوتاه (برای «کمکِ سازنده»: سازنده از روی این تصمیم می‌گیرد کی صدایش کند)</label><input id="aDesc" value="${esc(v.description)}"></div>
     <div class="field"><label>دستورالعمل (system prompt)</label><textarea id="aPrompt" placeholder="You are a database specialist. Check migrations, indexes, transactions...">${esc(v.prompt)}</textarea></div>
     <div class="field skills-field">
       <label>${ic('puzzle', 'sm')} اسکیل‌های این ساب‌ایجنت</label>
@@ -1185,7 +1185,7 @@ async function setupDialog(opts = {}) {
           ${!x.installed ? `${okState(false, '', 'Codex CLI نصب نیست')}
             ${st.node.npm ? `<div class="row-gap"><button type="button" class="btn btn-primary btn-sm" data-install="codex">${ic('download')}نصب Codex CLI</button></div>`
               : `<div class="wz-note">${ic('info', 'sm')}<span>برای نصب Codex اول Node.js لازم است.</span></div><div class="row-gap"><button type="button" class="btn btn-secondary btn-sm" data-install="node">${ic('external-link')}دانلود Node.js</button></div>`}
-            <div class="wz-note">${ic('info', 'sm')}بدون Codex هم کار می‌کند: Claude در یک نشست جدا نقش تستر را می‌گیرد.</div>`
+            <div class="wz-note">${ic('info', 'sm')}بدون Codex هم کار می‌کند: تستر می‌تواند Claude (در نشست جدا) یا یکی از «اتصال‌های دیگر» مثل DeepSeek باشد.</div>`
           : `${okState(x.connected, `${codexVia} وصل است`, 'هنوز وصل نیست')} <span class="help" dir="ltr">${esc(x.version || '')}</span>
             <div class="row-gap">
               ${x.connected ? `<button type="button" class="btn btn-ghost btn-sm btn-danger-text" data-logout="codex">${ic('log-out')}خروج</button>`
@@ -1479,7 +1479,7 @@ function renderAttachments() {
   const strip = $('#attachStrip');
   strip.hidden = !S.attach.length;
   strip.innerHTML = S.attach.map((a, i) => `<span class="att"><img src="${a.url}" alt="تصویر ${i + 1}"><button type="button" data-unattach="${i}" aria-label="حذف تصویر" title="حذف">${ic('x', 'sm')}</button></span>`).join('')
-    + (S.attach.length ? `<span class="att-note">${ic('image', 'sm')}${S.attach.length.toLocaleString('fa-IR')} تصویر — Claude آن‌ها را می‌بیند</span>` : '');
+    + (S.attach.length ? `<span class="att-note">${ic('image', 'sm')}${S.attach.length.toLocaleString('fa-IR')} تصویر — سازنده آن‌ها را می‌بیند</span>` : '');
 }
 function clearAttachments() { S.attach.forEach(a => URL.revokeObjectURL(a.url)); S.attach = []; renderAttachments(); }
 async function addImages(files) {
@@ -1921,8 +1921,7 @@ async function providerDialog(id) {
 function subSpec(a) { return a.model !== undefined ? a.model : (a.engine === 'codex' ? 'engine:codex' : 'engine:claude'); }
 function subRunnerOptions(a) {
   const st = S.settings || {};
-  const main = roleAgent('reviewer');
-  const opts = [['', `مثل تستر اصلی (${main.name})`], ['engine:claude', `Claude · ${prettyModel(st.specialistModel) || 'پیش‌فرض'}`], ['engine:codex', 'Codex (حساب شما)'],
+  const opts = [['', 'مثل تستر اصلی'], ['engine:claude', `Claude · ${prettyModel(st.specialistModel) || 'پیش‌فرض'}`], ['engine:codex', 'Codex (حساب شما)'],
     ...claudeModels().map(([id, name]) => [id, name]),
     ...(S.providers || []).flatMap(p => p.models.map(m => [`p:${p.id}:${m}`, `${p.name} · ${m}`]))];
   const cur = subSpec(a);
@@ -1931,7 +1930,7 @@ function subRunnerOptions(a) {
 }
 function subRunnerLabel(a) {
   const spec = subSpec(a);
-  if (!spec) return `مثل تستر اصلی (${roleAgent('reviewer').name})`;
+  if (!spec) return 'مثل تستر اصلی';
   if (spec === 'engine:codex') return 'Codex';
   if (spec === 'engine:claude') return `Claude · ${prettyModel((S.settings || {}).specialistModel) || 'پیش‌فرض'}`;
   return prettyModel(spec);

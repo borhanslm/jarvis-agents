@@ -109,7 +109,7 @@
     <section class="side-panel" id="tabTeam" role="tabpanel" aria-labelledby="tabBtnTeam" hidden>
       <div class="side-head">
         <h3 class="side-sub">ایجنت‌ها</h3>
-        <button class="btn btn-secondary btn-sm" id="btnSetup" type="button" title="وصل کردن Claude و Codex، نصب CLIها">
+        <button class="btn btn-secondary btn-sm" id="btnSetup" type="button" title="وصل کردن حساب‌ها و APIها (Claude، Codex، DeepSeek و…)">
           <svg class="ic" aria-hidden="true"><use href="icons.svg#i-plug" /></svg><span>اتصال حساب‌ها</span>
         </button>
       </div>
@@ -207,7 +207,7 @@
         <ol class="steps" id="homeSteps">
           <li><span class="step-n">۱</span>یک پروژه اضافه کنید یا «کشف» را بزنید</li>
           <li><span class="step-n">۲</span>فرمان را همین‌جا بنویسید</li>
-          <li><span class="step-n">۳</span>Claude می‌سازد، Codex تست می‌کند</li>
+          <li><span class="step-n">۳</span>سازنده می‌سازد، تستر تست می‌کند</li>
         </ol>
         <div id="dashboard" class="dashboard"></div>
       </div>
@@ -217,9 +217,9 @@
       <div class="composer-card">
         <div class="composer-top">
           <div class="modes" id="modes" role="radiogroup" aria-label="حالت کار">
-            <label title="Claude می‌نویسد، Codex تست می‌کند، Claude رفع می‌کند"><input type="radio" name="mode" value="team" checked><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-handshake" /></svg>تیمی</span></label>
-            <label title="Codex اول پروژه را تحلیل و تست می‌کند، Claude باگ‌ها را رفع می‌کند"><input type="radio" name="mode" value="audit"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-scan-search" /></svg>بازرسی و رفع</span></label>
-            <label title="Claude طرح می‌دهد، Codex نقد می‌کند، Claude طرح نهایی را می‌نویسد (بدون تغییر کد)"><input type="radio" name="mode" value="plan"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-map" /></svg>طراحی</span></label>
+            <label title="سازنده می‌نویسد، تستر تست می‌کند، سازنده رفع می‌کند"><input type="radio" name="mode" value="team" checked><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-handshake" /></svg>تیمی</span></label>
+            <label title="تستر اول پروژه را تحلیل و تست می‌کند، سازنده باگ‌ها را رفع می‌کند"><input type="radio" name="mode" value="audit"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-scan-search" /></svg>بازرسی و رفع</span></label>
+            <label title="سازنده طرح می‌دهد، تستر نقد می‌کند، سازنده طرح نهایی را می‌نویسد (بدون تغییر کد)"><input type="radio" name="mode" value="plan"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-map" /></svg>طراحی</span></label>
             <label title="فقط سازنده، بدون بررسی"><input type="radio" name="mode" value="claude"><span><i class="agent-dot claude" aria-hidden="true"></i>فقط سازنده</span></label>
             <label title="فقط تستر (فقط خواندنی)"><input type="radio" name="mode" value="codex"><span><i class="agent-dot codex" aria-hidden="true"></i>فقط تستر</span></label>
           </div>
@@ -232,9 +232,9 @@
         <div class="composer-bottom">
           <div class="model-bar" id="modelBar" role="group" aria-label="مدل‌های این گفتگو" title="مدل‌های همین گفتگو — از اجرای بعدی اعمال می‌شود. Ctrl+Enter برای ارسال">
             <span class="mpick claude"><i class="agent-dot claude" aria-hidden="true"></i>
-              <select id="mClaude" aria-label="مدل سازنده" title="سازنده"></select><select id="mClaudeEffort" aria-label="میزان فکر Claude"></select></span>
+              <select id="mClaude" aria-label="مدل سازنده" title="سازنده"></select><select id="mClaudeEffort" aria-label="میزان فکر سازنده"></select></span>
             <span class="mpick codex"><i class="agent-dot codex" aria-hidden="true"></i>
-              <select id="mCodex" aria-label="مدل تستر" title="تستر"></select><select id="mCodexEffort" aria-label="میزان فکر Codex"></select></span>
+              <select id="mCodex" aria-label="مدل تستر" title="تستر"></select><select id="mCodexEffort" aria-label="میزان فکر تستر"></select></span>
           </div>
           <div class="input-actions">
             <button type="button" class="icon-btn" id="btnAttach" aria-label="پیوست تصویر" title="پیوست تصویر — یا تصویر را بکشید یا Ctrl+V بزنید">

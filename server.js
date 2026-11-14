@@ -130,6 +130,15 @@ setInterval(async () => {
 }, 30000).unref();
 
 const cliPath = c => c ? (c.pre && c.pre.length ? c.pre[c.pre.length - 1] : c.cmd) : null;
+// Does this run use the user's own Claude account? (Not when connections fill the roles.)
+function needsClaudeAccount(chat, mode) {
+  const s = { ...store.settings(chat.projectId), ...Object.fromEntries(Object.entries(chat.models || {}).filter(([, v]) => v)) };
+  const own = spec => !/^p:/.test(spec || '');
+  const builder = own(s.builderModel);
+  const reviewerOnClaude = s.reviewer === 'claude' ? own(s.reviewerModel) : false;
+  if (mode === 'codex') return reviewerOnClaude;
+  return builder || reviewerOnClaude;
+}
 function tailFile(file, lines = 150) {
   try { const t = fs.readFileSync(file, 'utf8'); return t.split('\n').slice(-lines).join('\n'); } catch { return null; }
 }
@@ -464,7 +473,7 @@ async function api(req, res, url) {
       const mode = ['team', 'audit', 'plan', 'claude', 'codex'].includes(body.mode) ? body.mode : 'team';
       if (body.models) store.setChatModels(chat, body.models);
       // Every mode except "codex only" needs Claude; say so up front instead of failing mid-run.
-      if (mode !== 'codex' && !(await claudeReady())) {
+      if (needsClaudeAccount(chat, mode) && !(await claudeReady())) {
         return send(res, 409, { error: 'Claude هنوز وصل نیست — از «اتصال حساب‌ها» کلید API یا ورود را تنظیم کنید.', needSetup: true });
       }
       const att = (Array.isArray(body.attachments) ? body.attachments : []).slice(0, 8).map(f => attachPath(chat.id, String(f))).filter(f => f && fs.existsSync(f));
@@ -494,7 +503,7 @@ async function api(req, res, url) {
       if (!proj) return send(res, 400, { error: 'پروژه‌ی این چت حذف شده' });
       const last = [...chat.messages].reverse().find(x => x.agent === 'user' && x.kind === 'text' && x.text);
       if (!last) return send(res, 400, { error: 'پیامی برای اجرای دوباره نیست' });
-      if (last.mode !== 'codex' && !(await claudeReady())) return send(res, 409, { error: 'Claude هنوز وصل نیست', needSetup: true });
+      if (needsClaudeAccount(chat, last.mode) && !(await claudeReady())) return send(res, 409, { error: 'Claude هنوز وصل نیست', needSetup: true });
       const att = (last.attachments || []).map(f => attachPath(chat.id, f)).filter(f => f && fs.existsSync(f));
       orch.run(chat, proj, last.text, last.mode || 'team', att.length ? { attachments: att } : {}).catch(e => console.error(e));
       return send(res, 200, { ok: true });
@@ -590,7 +599,7 @@ server.listen(PORT, HOST, () => {
   resolveReady({ port: PORT, token: TOKEN, dataDir: DATA });
   // The desktop app passes the token to its own window; never write it to logs there.
   const panel = `http://localhost:${PORT}/` + (tokenRequired() && !DESKTOP ? `?token=${TOKEN}` : '');
-  console.log(`\n  J.A.R.V.I.S  ·  Claude Code ⇄ Codex`);
+  console.log(`\n  J.A.R.V.I.S  ·  AI coding team`);
   console.log(`  Panel:  ${panel}`);
   if (store.settings().requireToken) console.log(`  (access token is required — open the link above; token file: ${TOKEN_FILE})`);
   if (process.env.JARVIS_OPEN === '1') {
