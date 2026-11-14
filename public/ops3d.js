@@ -326,7 +326,10 @@ let pruneTimer = null;
 async function openOps() {
   ensureOverlay();
   overlay.hidden = false;
-  if (!room) room = new Room(overlay.querySelector('#opsCanvas'));
+  // colours come from the current look/theme: rebuild the scene if it changed since last time
+  const look = [document.documentElement.dataset.skin, document.documentElement.dataset.theme, css('--color-primary', '')].join('|');
+  if (room && room.look !== look) { room.stop(); room.ro.disconnect(); listeners.delete(room.onEvent); room.renderer.dispose(); overlay.querySelector('#opsCanvas').innerHTML = ''; room = null; }
+  if (!room) { room = new Room(overlay.querySelector('#opsCanvas')); room.look = look; }
   await loadRunning();
   room.prune(); refreshInfo();
   room.start();
