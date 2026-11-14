@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../public/tokens.css">
+<link rel="stylesheet" href="assets.css">
+<style>
+  body { width: 1280px; height: 640px; background: var(--p-color-slate-50); color: var(--p-color-slate-950); }
+  .cols { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr; }
+  .left { position: relative; background: var(--p-color-slate-950); overflow: hidden; }
+  .tile { position: absolute; border-radius: 18px; }
+  .t1 { left: 72px; top: 72px; width: 224px; height: 224px; background: var(--p-color-cyan-400); }
+  .t2 { left: 320px; top: 72px; width: 224px; height: 224px; border: 3px solid var(--p-color-cyan-400); }
+  .t3 { left: 72px; top: 320px; width: 224px; height: 224px; background: var(--p-color-orange-400); }
+  .t4 { left: 320px; top: 320px; width: 224px; height: 224px; background: var(--p-color-violet-400); }
+  .t2::after { content: ''; position: absolute; inset: 64px; border-radius: 50%; background: var(--p-color-cyan-400); }
+  .lbl { position: absolute; font: 800 26px var(--font-sans); color: var(--p-color-slate-950); bottom: 20px; right: 22px; }
+  .right { display: flex; flex-direction: column; justify-content: center; gap: 22px; padding: 0 96px 0 72px; }
+  .brand { font: 700 22px var(--font-mono); letter-spacing: .38em; color: var(--p-color-cyan-700); direction: ltr; text-align: right; }
+  h1 { margin: 0; font: 900 76px/1.08 var(--font-sans); letter-spacing: -.01em; }
+  p { margin: 0; font: 400 22px/1.7 var(--font-sans); color: var(--p-color-slate-600); }
+  .cta { align-self: flex-start; height: 54px; display: inline-flex; align-items: center; padding: 0 28px; border-radius: 12px; background: var(--p-color-slate-950); color: var(--p-color-slate-50); font: 700 19px var(--font-sans); }
+</style></head><body>
+<div class="cols">
+  <div class="right">
+    <div class="brand">JARVIS</div>
+    <h1>بنویس.<br>تست کن.<br>تأیید.</h1>
+    <p>Claude و Codex، کنار هم روی پروژه‌ی شما — محلی و فارسی.</p>
+    <span class="cta">دانلود برای ویندوز</span>
+  </div>
+  <div class="left">
+    <div class="tile t1"><span class="lbl">پروژه</span></div>
+    <div class="tile t2"></div>
+    <div class="tile t3"><span class="lbl">Claude</span></div>
+    <div class="tile t4"><span class="lbl">Codex</span></div>
+  </div>
+</div>
+</body></html>

@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="fa" dir="rtl" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>JARVIS · Claude ⇄ Codex</title>
+<!-- Everything is local: fonts, icons and three.js are bundled; no network requests. -->
+<script>
+  // Apply the saved theme before first paint (no flash).
+  try { const k = localStorage.getItem('jarvis.skin'); if (k && /^[a-z]{2,12}$/.test(k) && k !== 'holo') document.documentElement.dataset.skin = k; } catch {}
+  try { let t = localStorage.getItem('jarvis.theme'); if (t === 'system') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch {}
+</script>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="holo.css">
+<link rel="stylesheet" href="skins.css">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+</head>
+<body>
+<a class="skip-link" href="#stream">رفتن به محتوای اصلی</a>
+
+<header class="topbar">
+  <div class="brand" id="brand" role="link" tabindex="0" aria-label="جارویس — صفحه‌ی اصلی" title="صفحه‌ی اصلی">
+    <svg class="brand-mark reactor" id="reactor" viewBox="0 0 48 48" aria-hidden="true">
+      <circle class="rm-ring" cx="24" cy="24" r="19" />
+      <circle class="rm-orbit" cx="24" cy="24" r="13" />
+      <circle class="rm-core" cx="24" cy="24" r="6" />
+      <circle class="rm-a" cx="24" cy="5" r="3.4" />
+      <circle class="rm-b" cx="24" cy="43" r="3.4" />
+    </svg>
+    <div class="brand-text">
+      <span class="brand-name">JARVIS</span>
+      <span class="brand-sub">Claude می‌سازد · Codex تست می‌کند</span>
+    </div>
+  </div>
+
+  <div class="top-center">
+    <div class="agent-chips" id="agentChips" aria-live="polite"></div>
+  </div>
+
+  <div class="top-actions">
+    <button class="icon-btn" id="btnPalette" type="button" aria-label="جستجو و فرمان" title="جستجو و فرمان (Ctrl+K)">
+      <svg class="ic" aria-hidden="true"><use href="icons.svg#i-search" /></svg>
+    </button>
+    <button class="icon-btn" id="btnSkin" type="button" aria-label="ظاهر برنامه" title="ظاهر برنامه — ۱۲ مدل">
+      <svg class="ic" aria-hidden="true"><use href="icons.svg#i-palette" /></svg>
+    </button>
+    <button class="icon-btn" id="btnTheme" type="button" aria-label="تغییر تم" title="تم روشن / تیره">
+      <svg class="ic" aria-hidden="true"><use href="icons.svg#i-sun" /></svg>
+    </button>
+    <button class="btn btn-ghost" id="btnSettings" type="button">
+      <svg class="ic" aria-hidden="true"><use href="icons.svg#i-settings" /></svg><span>تنظیمات</span>
+    </button>
+    <button class="icon-btn" id="btnMenu" type="button" aria-label="منو" aria-controls="sidebar">
+      <svg class="ic" aria-hidden="true"><use href="icons.svg#i-menu" /></svg>
+    </button>
+  </div>
+
+  <!-- Desktop app only: window buttons (the native title bar is hidden). -->
+  <div class="win-controls" id="winControls" hidden>
+    <button type="button" class="win-btn" id="winMin" aria-label="کوچک کردن پنجره" title="کوچک کردن"><svg class="ic" aria-hidden="true"><use href="icons.svg#i-minus" /></svg></button>
+    <button type="button" class="win-btn" id="winMax" aria-label="بزرگ کردن پنجره" title="بزرگ کردن"><svg class="ic" aria-hidden="true"><use href="icons.svg#i-square" /></svg></button>
+    <button type="button" class="win-btn close" id="winClose" aria-label="بستن" title="بستن"><svg class="ic" aria-hidden="true"><use href="icons.svg#i-x" /></svg></button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar" aria-label="پروژه‌ها و گفتگوها">
+    <section class="side-block projects" aria-labelledby="hProjects">
+      <div class="side-head">
+        <h2 id="hProjects"><svg class="ic" aria-hidden="true"><use href="icons.svg#i-folder" /></svg>پروژه‌ها</h2>
+        <div class="side-actions">
+          <button class="icon-btn sm" id="btnDiscover" type="button" aria-label="کشف پروژه‌ها" title="پیدا کردن پروژه‌هایی که با Claude یا Codex باز کرده‌اید">
+            <svg class="ic" aria-hidden="true"><use href="icons.svg#i-folder-search" /></svg>
+          </button>
+          <button class="icon-btn sm" id="btnAddProject" type="button" aria-label="افزودن پروژه" title="افزودن پروژه">
+            <svg class="ic" aria-hidden="true"><use href="icons.svg#i-folder-plus" /></svg>
+          </button>
+        </div>
+      </div>
+      <ul class="nav-list" id="projectList"></ul>
+      <div class="project-info" id="projectInfo" hidden></div>
+    </section>
+
+    <button class="btn btn-primary btn-block" id="btnNewChat" type="button" disabled>
+      <svg class="ic" aria-hidden="true"><use href="icons.svg#i-plus" /></svg><span>گفتگوی جدید</span>
+    </button>
+
+    <div class="side-tabs" role="tablist" aria-label="بخش‌های نوار کناری">
+      <button class="side-tab on" role="tab" aria-selected="true" aria-controls="tabChats" id="tabBtnChats" data-tab="chats" type="button">
+        <svg class="ic" aria-hidden="true"><use href="icons.svg#i-messages-square" /></svg>گفتگوها
+      </button>
+      <button class="side-tab" role="tab" aria-selected="false" aria-controls="tabTeam" id="tabBtnTeam" data-tab="team" type="button" tabindex="-1">
+        <svg class="ic" aria-hidden="true"><use href="icons.svg#i-users" /></svg>تیم
+      </button>
+    </div>
+
+    <section class="side-panel" id="tabChats" role="tabpanel" aria-labelledby="tabBtnChats">
+      <div class="chat-search">
+        <svg class="ic sm" aria-hidden="true"><use href="icons.svg#i-search" /></svg>
+        <label class="sr-only" for="chatSearch">جستجو در گفتگوها</label>
+        <input id="chatSearch" type="search" dir="auto" placeholder="جستجو در گفتگوها و پیام‌ها…" autocomplete="off">
+      </div>
+      <ul class="nav-list chats" id="chatList"></ul>
+    </section>
+
+    <section class="side-panel" id="tabTeam" role="tabpanel" aria-labelledby="tabBtnTeam" hidden>
+      <div class="side-head">
+        <h3 class="side-sub">ایجنت‌ها</h3>
+        <button class="btn btn-secondary btn-sm" id="btnSetup" type="button" title="وصل کردن Claude و Codex، نصب CLIها">
+          <svg class="ic" aria-hidden="true"><use href="icons.svg#i-plug" /></svg><span>اتصال حساب‌ها</span>
+        </button>
+      </div>
+      <div id="agentCards" class="agent-cards"></div>
+      <div class="row-gap">
+        <button class="btn btn-secondary btn-sm" id="btnDiag" type="button" title="وضعیت CLIها، ورود، لاگ‌ها و به‌روزرسانی">
+          <svg class="ic" aria-hidden="true"><use href="icons.svg#i-activity" /></svg><span>عیب‌یابی</span>
+        </button>
+        <button class="btn btn-secondary btn-sm" id="btnBackup" type="button" title="ذخیره و بازگردانی تنظیمات، پروژه‌ها و گفتگوها">
+          <svg class="ic" aria-hidden="true"><use href="icons.svg#i-archive" /></svg><span>پشتیبان</span>
+        </button>
+      </div>
+      <div class="side-head">
+        <h3 class="side-sub">ساب‌ایجنت‌ها</h3>
+        <button class="btn btn-secondary btn-sm" id="btnAddSub" type="button" title="ساخت ایجنت متخصص جدید">
+          <svg class="ic" aria-hidden="true"><use href="icons.svg#i-plus" /></svg><span>ساب‌ایجنت</span>
+        </button>
+      </div>
+      <ul class="nav-list sub-list" id="subList"></ul>
+    </section>
+  </aside>
+
+  <main class="main" id="main">
+    <div class="chat-head" id="chatHead" hidden>
+      <div class="chat-title-wrap">
+        <h1 id="chatTitle" title="برای تغییر نام دوبار کلیک کنید"></h1>
+        <span class="status-pill" id="chatStatus" role="status"></span>
+      </div>
+      <div class="chat-meta">
+        <span class="cost" id="chatCost"></span>
+        <button class="btn btn-ghost btn-sm" id="btnExport" type="button" title="ذخیره‌ی این گفتگو به‌صورت فایل Markdown">
+          <svg class="ic" aria-hidden="true"><use href="icons.svg#i-download" /></svg><span>خروجی</span>
+        </button>
+        <button class="btn btn-ghost btn-sm" id="btnDiff" type="button" title="تغییرات فعلی پروژه، فایل به فایل">
+          <svg class="ic" aria-hidden="true"><use href="icons.svg#i-file-diff" /></svg><span>تغییرات</span>
+        </button>
+        <button class="btn btn-ghost btn-sm" id="btnReset" type="button" title="شروع نشست تازه برای همه‌ی ایجنت‌ها">
+          <svg class="ic" aria-hidden="true"><use href="icons.svg#i-rotate-ccw" /></svg><span>نشست تازه</span>
+        </button>
+        <button class="btn btn-ghost btn-sm btn-danger-text" id="btnDeleteChat" type="button">
+          <svg class="ic" aria-hidden="true"><use href="icons.svg#i-trash-2" /></svg><span>حذف</span>
+        </button>
+        <button class="btn btn-danger btn-sm" id="btnStop" type="button" hidden>
+          <svg class="ic" aria-hidden="true"><use href="icons.svg#i-circle-stop" /></svg><span>توقف</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="stream" id="stream" tabindex="-1" aria-live="polite" aria-relevant="additions">
+      <div class="welcome home" id="welcome">
+        <section class="holo-stage" aria-label="وضعیت جارویس">
+          <article class="agent-orb claude" id="orbClaude" aria-live="polite"></article>
+          <div class="reactor-wrap">
+            <svg class="holo-reactor" viewBox="0 0 400 400" aria-hidden="true">
+              <defs>
+                <linearGradient id="hrGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="hr-a"/><stop offset="1" class="hr-b"/></linearGradient>
+                <radialGradient id="hrCore"><stop offset="0" class="hr-core-0"/><stop offset=".45" class="hr-core-1"/><stop offset="1" class="hr-core-2"/></radialGradient>
+              </defs>
+              <circle class="hr-halo" cx="200" cy="200" r="150" fill="url(#hrCore)" />
+              <g class="hr-ticks"><circle cx="200" cy="200" r="188" /></g>
+              <circle class="hr-thin" cx="200" cy="200" r="172" />
+              <g class="hr-arc a1"><circle cx="200" cy="200" r="156" /></g>
+              <g class="hr-arc a2"><circle cx="200" cy="200" r="136" /></g>
+              <g class="hr-arc a3"><circle cx="200" cy="200" r="114" /></g>
+              <circle class="hr-thin" cx="200" cy="200" r="102" />
+              <g class="hr-orbit">
+                <circle class="hr-node claude" cx="200" cy="44" r="7" />
+                <circle class="hr-node codex" cx="200" cy="356" r="7" />
+              </g>
+              <circle class="hr-core" cx="200" cy="200" r="88" />
+            </svg>
+            <div class="reactor-center">
+              <span class="rc-kicker">J.A.R.V.I.S</span>
+              <b class="rc-time" id="hudTime">--:--</b>
+              <span class="rc-date" id="hudDate"></span>
+              <span class="rc-state" id="homeState">همه‌ی سیستم‌ها آماده</span>
+            </div>
+          </div>
+          <article class="agent-orb codex" id="orbCodex" aria-live="polite"></article>
+        </section>
+
+        <div class="holo-greet">
+          <h1 id="homeGreet">جارویس آماده‌ی خدمت است.</h1>
+          <p>Claude کد را می‌نویسد، Codex تحلیل و تست می‌کند و باگ‌ها را گزارش می‌دهد، و Claude آن‌ها را رفع می‌کند — تا وقتی Codex تأیید کند.</p>
+        </div>
+
+        <form class="command" id="homeCmd" autocomplete="off">
+          <svg class="ic cmd-ic" aria-hidden="true"><use href="icons.svg#i-sparkles" /></svg>
+          <label class="sr-only" for="homeInput">فرمان به جارویس</label>
+          <input id="homeInput" dir="auto" placeholder="به جارویس بگویید چه بسازد یا چه چیزی را بررسی کند…">
+          <span class="cmd-proj" id="homeProj"></span>
+          <button type="submit" class="btn btn-primary" id="homeSend"><svg class="ic flip-rtl" aria-hidden="true"><use href="icons.svg#i-send" /></svg><span>شروع</span></button>
+        </form>
+
+        <ol class="steps" id="homeSteps">
+          <li><span class="step-n">۱</span>یک پروژه اضافه کنید یا «کشف» را بزنید</li>
+          <li><span class="step-n">۲</span>فرمان را همین‌جا بنویسید</li>
+          <li><span class="step-n">۳</span>Claude می‌سازد، Codex تست می‌کند</li>
+        </ol>
+        <div id="dashboard" class="dashboard"></div>
+      </div>
+    </div>
+
+    <form class="composer" id="composer" hidden>
+      <div class="composer-card">
+        <div class="composer-top">
+          <div class="modes" id="modes" role="radiogroup" aria-label="حالت کار">
+            <label title="Claude می‌نویسد، Codex تست می‌کند، Claude رفع می‌کند"><input type="radio" name="mode" value="team" checked><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-handshake" /></svg>تیمی</span></label>
+            <label title="Codex اول پروژه را تحلیل و تست می‌کند، Claude باگ‌ها را رفع می‌کند"><input type="radio" name="mode" value="audit"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-scan-search" /></svg>بازرسی و رفع</span></label>
+            <label title="Claude طرح می‌دهد، Codex نقد می‌کند، Claude طرح نهایی را می‌نویسد (بدون تغییر کد)"><input type="radio" name="mode" value="plan"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-map" /></svg>طراحی</span></label>
+            <label title="فقط Claude"><input type="radio" name="mode" value="claude"><span><i class="agent-dot claude" aria-hidden="true"></i>Claude</span></label>
+            <label title="فقط Codex (فقط خواندنی)"><input type="radio" name="mode" value="codex"><span><i class="agent-dot codex" aria-hidden="true"></i>Codex</span></label>
+          </div>
+          <div class="mentions" id="mentions" aria-label="صدا زدن مستقیم ساب‌ایجنت"></div>
+          <div class="quick" id="quickPrompts" aria-label="فرمان‌های آماده"></div>
+        </div>
+        <div class="attach-strip" id="attachStrip" hidden></div>
+        <label class="sr-only" for="input">پیام</label>
+        <textarea id="input" rows="2" placeholder="به جارویس بگویید چه بسازد یا چه چیزی را بررسی کند…" dir="auto"></textarea>
+        <div class="composer-bottom">
+          <div class="model-bar" id="modelBar" role="group" aria-label="مدل‌های این گفتگو" title="مدل‌های همین گفتگو — از اجرای بعدی اعمال می‌شود. Ctrl+Enter برای ارسال">
+            <span class="mpick claude"><i class="agent-dot claude" aria-hidden="true"></i>
+              <select id="mClaude" aria-label="مدل Claude"></select><select id="mClaudeEffort" aria-label="میزان فکر Claude"></select></span>
+            <span class="mpick codex"><i class="agent-dot codex" aria-hidden="true"></i>
+              <select id="mCodex" aria-label="مدل Codex"></select><select id="mCodexEffort" aria-label="میزان فکر Codex"></select></span>
+          </div>
+          <div class="input-actions">
+            <button type="button" class="icon-btn" id="btnAttach" aria-label="پیوست تصویر" title="پیوست تصویر — یا تصویر را بکشید یا Ctrl+V بزنید">
+              <svg class="ic" aria-hidden="true"><use href="icons.svg#i-paperclip" /></svg>
+            </button>
+            <input type="file" id="fileInput" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
+            <button type="button" class="icon-btn" id="btnMic" aria-label="ورودی صوتی" title="ورودی صوتی">
+              <svg class="ic" aria-hidden="true"><use href="icons.svg#i-mic" /></svg>
+            </button>
+            <button type="submit" class="btn btn-primary" id="btnSend">
+              <svg class="ic flip-rtl" aria-hidden="true"><use href="icons.svg#i-send" /></svg><span>ارسال</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </form>
+  </main>
+</div>
+
+<dialog id="dlg" aria-modal="true">
+  <form method="dialog" class="dlg-body" id="dlgBody"></form>
+</dialog>
+
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+<script src="skins.js"></script>
+<script src="app.js"></script>
+<script type="module" src="dashboard.js"></script>
+</body>
+</html>

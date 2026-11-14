@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../public/tokens.css">
+<link rel="stylesheet" href="assets.css">
+<style>
+  body { width: 1280px; height: 640px; background: linear-gradient(135deg, var(--p-color-slate-950) 0%, #10233a 55%, #1a1640 100%); }
+  .blob { position: absolute; border-radius: 50%; filter: blur(60px); opacity: .55; }
+  .b1 { width: 420px; height: 420px; background: var(--p-color-cyan-500); left: 120px; top: 40px; }
+  .b2 { width: 300px; height: 300px; background: var(--p-color-violet-600); left: 380px; top: 300px; }
+  .b3 { width: 240px; height: 240px; background: var(--p-color-orange-400); left: 40px; top: 380px; opacity: .35; }
+  .glass { position: absolute; left: 96px; top: 96px; width: 520px; height: 448px; border-radius: 22px; background: rgb(15 23 42 / .45); border: 1px solid rgb(255 255 255 / .14); backdrop-filter: blur(18px); box-shadow: 0 30px 80px rgb(0 0 0 / .45); padding: 26px; display: flex; flex-direction: column; gap: 14px; }
+  .bar { display: flex; gap: 8px; } .bar i { width: 12px; height: 12px; border-radius: 50%; background: rgb(255 255 255 / .2); }
+  .m { border-radius: 14px; padding: 14px 16px; font: 500 17px/1.6 var(--font-sans); color: var(--p-color-slate-100); background: rgb(255 255 255 / .06); border: 1px solid rgb(255 255 255 / .08); }
+  .m .t { display: inline-block; font: 700 13px var(--font-sans); padding: 1px 10px; border-radius: 6px; margin-bottom: 6px; }
+  .m.c { border-right: 4px solid var(--p-color-orange-400); } .m.c .t { background: rgb(251 146 60 / .18); color: var(--p-color-orange-300); }
+  .m.x { border-right: 4px solid var(--p-color-violet-400); } .m.x .t { background: rgb(167 139 250 / .2); color: var(--p-color-violet-300); }
+  .ok { display: inline-flex; align-items: center; gap: 8px; font: 700 16px var(--font-sans); color: var(--p-color-green-400); }
+  .wrap { position: absolute; inset: 110px 112px 110px 680px; display: flex; flex-direction: column; justify-content: center; gap: 18px; }
+  .brand { font: 700 30px var(--font-mono); letter-spacing: .3em; color: var(--p-color-slate-50); direction: ltr; text-align: right; }
+  h1 { margin: 0; font: 800 50px/1.25 var(--font-sans); color: var(--p-color-slate-50); }
+  p { margin: 0; font: 400 21px/1.7 var(--font-sans); color: var(--p-color-slate-300); }
+  .cta { align-self: flex-start; display: inline-flex; height: 52px; align-items: center; padding: 0 26px; border-radius: 999px; background: var(--p-color-slate-50); color: var(--p-color-slate-950); font: 700 19px var(--font-sans); margin-top: 8px; }
+</style></head><body>
+<div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+<div class="glass">
+  <div class="bar"><i></i><i></i><i></i></div>
+  <div class="m c"><span class="t">Claude · سازنده</span><br>صفحه‌ی ورود با اعتبارسنجی و تست ساخته شد.</div>
+  <div class="m x"><span class="t">Codex · تستر</span><br>۲ باگ پیدا شد: ورودی خالی و نشت توکن در لاگ.</div>
+  <div class="m c"><span class="t">Claude · دور ۲</span><br>هر دو رفع شد؛ ۱۴ تست پاس است.</div>
+  <span class="ok">✓ Codex تأیید کرد</span>
+</div>
+<div class="wrap">
+  <div class="brand">JARVIS</div>
+  <h1>تیم دو نفره‌ی شما برای کد بی‌باگ</h1>
+  <p>Claude می‌نویسد، Codex تست می‌کند و باگ‌ها را می‌گوید، Claude رفع می‌کند — خودکار، تا تأیید.</p>
+  <span class="cta">دانلود رایگان برای ویندوز</span>
+</div>
+</body></html>
