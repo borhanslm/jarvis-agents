@@ -96,3 +96,20 @@ test('builder and reviewer run on a custom Anthropic-compatible API with its own
     assert.equal(rv.review && rv.review.verdict, 'pass');
   } finally { srv.close(); }
 });
+
+test('review sub-agents run on whatever they are set to (main reviewer, Codex, a Claude model, a connection)', () => {
+  const o = new Orchestrator({ store: new Store(tmp('jarvis-sr-')), broadcast() {} });
+  o.resolveProvider = spec => /^p:ds:/.test(spec) ? { engine: 'claude', model: 'deepseek-chat' } : /^p:oa:/.test(spec) ? { engine: 'codex', model: 'gpt-x' } : null;
+  const s = { reviewer: 'codex', reviewerModel: 'claude-sonnet-5-5' };
+  assert.deepEqual(o.subRunner({ model: '' }, s), { engine: 'codex', modelOverride: null });
+  assert.deepEqual(o.subRunner({ model: '' }, { ...s, reviewer: 'claude' }), { engine: 'claude', modelOverride: 'claude-sonnet-5-5' });
+  assert.deepEqual(o.subRunner({ model: 'engine:codex' }, s), { engine: 'codex', modelOverride: '__codex_default' });
+  assert.deepEqual(o.subRunner({ model: 'engine:claude' }, s), { engine: 'claude', modelOverride: null });
+  assert.deepEqual(o.subRunner({ model: 'claude-opus-5-5' }, s), { engine: 'claude', modelOverride: 'claude-opus-5-5' });
+  assert.deepEqual(o.subRunner({ model: 'p:ds:deepseek-chat' }, s), { engine: 'codex', modelOverride: 'p:ds:deepseek-chat' }); // goes through the connection branch
+  assert.deepEqual(o.subRunner({ engine: 'codex' }, s), { engine: 'codex', modelOverride: '__codex_default' }); // pre-1.2 data
+  const st = new Store(tmp('jarvis-sr2-'));
+  assert.equal(st.saveSubagent({ name: 'db', prompt: 'x', stage: 'review', model: 'p:ds:deepseek-chat' }).model, 'p:ds:deepseek-chat');
+  assert.equal(st.saveSubagent({ name: 'bad', prompt: 'x', stage: 'review', model: '"><img>' }).model, '');
+  assert.equal(st.saveSubagent({ name: 'helper', prompt: 'x', stage: 'builder', model: 'p:ds:deepseek-chat' }).model, '');
+});

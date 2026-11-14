@@ -130,7 +130,8 @@ function renderAgents() {
       ${busy(n) ? `<div class="act">${ic('zap', 'sm')}${esc(a[n].last || '')}</div>` : `<div class="act">${ic('circle-check', 'sm')}آماده</div>`}
       ${n === 'codex' && a.codex && a.codex.limitHit ? `<div class="warn">${ic('triangle-alert', 'sm')}<span>${esc(a.codex.limitHit).slice(0, 160)}</span></div>` : ''}
     </div>`;
-  $('#agentCards').innerHTML = card('claude', 'سازنده — همه‌ی کد را می‌نویسد و باگ‌ها را رفع می‌کند') + card('codex', 'تحلیلگر و تستر — بررسی، اجرای تست، گزارش باگ');
+  const roleOf = n => { const b = roleAgent('builder'), r = roleAgent('reviewer'); const who = n === 'claude' ? 'Claude' : 'Codex'; const roles = [b.provider ? null : (b.name === who ? 'سازنده' : null), r.provider ? null : (r.name === who ? 'تستر اصلی' : null)].filter(Boolean); return roles.length ? 'الان: ' + roles.join(' و ') : 'الان نقشی ندارد (برای ساب‌ایجنت‌ها یا جایگزینی در دسترس است)'; };
+  $('#agentCards').innerHTML = card('claude', roleOf('claude')) + card('codex', roleOf('codex'));
   $('#reactor').classList.toggle('busy', busy('claude') || busy('codex'));
   document.documentElement.classList.toggle('agents-busy', busy('claude') || busy('codex'));
   const orb = (n, role) => {
@@ -495,7 +496,7 @@ const SETTINGS_SCHEMA = [
     { k: 'limitMaxWaitHours', t: 'number', step: 1, l: 'حداکثر زمان انتظار برای تمدید سهمیه (ساعت)' },
     { k: 'specialistsTiming', t: 'select', l: 'زمان اجرای ساب‌ایجنت‌های تستر', o: [['after-pass', 'فقط بعد از تأیید تستر اصلی (ارزان‌تر)'], ['every-round', 'هر دور، موازی با تستر اصلی (سریع‌تر، گران‌تر)']] },
     { k: 'reviewDiffChars', t: 'number', step: 5000, l: 'حداکثر طول diff که به تستر داده می‌شود (کاراکتر، ۰ = خاموش)', h: 'تستر به‌جای گشتن دنبال تغییرات، مستقیم diff همین اجرا را می‌بیند → سریع‌تر و ارزان‌تر.' },
-    { k: 'liveStreaming', t: 'bool', l: 'نمایش زنده‌ی متن Claude هنگام نوشتن' },
+    { k: 'liveStreaming', t: 'bool', l: 'نمایش زنده‌ی متن سازنده هنگام نوشتن' },
     { k: 'useGraphify', t: 'bool', l: 'گراف کد graphify: ایجنت‌ها به‌جای جستجو و خواندن کل فایل‌ها از گراف پروژه استفاده کنند', h: 'گراف کاملاً محلی و بدون LLM ساخته می‌شود (tree-sitter). نیاز به نصب: uv tool install graphifyy' },
     { k: 'graphifyAutoUpdate', t: 'bool', l: 'به‌روزرسانی خودکار گراف قبل از هر اجرا و هر دور بررسی' },
     { k: 'graphifyBudget', t: 'number', step: 250, l: 'سقف توکن پاسخ هر پرس‌وجوی گراف' },
@@ -504,23 +505,23 @@ const SETTINGS_SCHEMA = [
   { title: 'مدل‌ها', icon: 'brain', fields: [
     { k: 'builderModel', t: 'model', m: 'claude', l: 'مدل سازنده (نوشتن و رفع کد)', h: MODEL_HELP, ph: 'sonnet' },
     { k: 'builderEffort', t: 'select', l: 'میزان فکر سازنده', o: EFFORTS },
-    { k: 'reviewerModel', t: 'model', m: 'claude', l: 'مدل Claude وقتی تستر است', h: MODEL_HELP, ph: 'sonnet' },
+    { k: 'reviewerModel', t: 'model', m: 'claude', l: 'مدل تستر وقتی «تستر اصلی» روی Claude است', h: MODEL_HELP, ph: 'sonnet' },
     { k: 'reviewerEffort', t: 'select', l: 'میزان فکر تستر', o: EFFORTS },
-    { k: 'specialistModel', t: 'model', m: 'claude', l: 'مدل ساب‌ایجنت‌های تستر (موتور Claude)', h: MODEL_HELP, ph: 'haiku' },
+    { k: 'specialistModel', t: 'model', m: 'claude', l: 'مدل ساب‌ایجنت‌هایی که «اجرا با: Claude» دارند', h: 'هر ساب‌ایجنت را می‌توانید در ویرایش خودش روی هر مدل یا اتصالی بگذارید.', ph: 'haiku' },
     { k: 'specialistEffort', t: 'select', l: 'میزان فکر ساب‌ایجنت‌ها', o: EFFORTS },
     { k: 'codexModel', t: 'model', m: 'codex', l: 'مدل تستر اصلی (Codex یا یکی از اتصال‌ها)', h: 'پیش‌فرض = مدل تنظیم‌شده در ~/.codex/config.toml. اتصال‌هایی مثل DeepSeek هم اینجا هستند.' },
     { k: 'codexEffort', t: 'select', l: 'میزان فکر Codex', o: [['', 'پیش‌فرض'], ['minimal', 'minimal'], ['low', 'low'], ['medium', 'medium'], ['high', 'high']] },
   ] },
   { title: 'جریان کار تیمی', icon: 'handshake', fields: [
     { k: 'maxRounds', t: 'number', step: 1, l: 'حداکثر دورهای «تست ← رفع»' },
-    { k: 'reviewer', t: 'select', l: 'تستر اصلی', o: [['codex', 'Codex'], ['claude', 'Claude (نشست جداگانه)']] },
-    { k: 'fallbackToClaude', t: 'bool', l: 'اگر Codex در دسترس نبود (مثلاً سقف مصرف)، Claude در نشستی جدا تست کند' },
-    { k: 'codexSandbox', t: 'select', l: 'سندباکس Codex هنگام تست', o: [['workspace-write', 'workspace-write — می‌تواند تست اجرا کند'], ['read-only', 'read-only — فقط خواندن']] },
+    { k: 'reviewer', t: 'select', l: 'تستر اصلی', o: [['codex', 'طبق «مدل تستر اصلی» (Codex یا یکی از اتصال‌ها)'], ['claude', 'Claude در نشست جداگانه']] },
+    { k: 'fallbackToClaude', t: 'bool', l: 'اگر تستر Codex در دسترس نبود (مثلاً سقف مصرف)، Claude در نشستی جدا تست کند' },
+    { k: 'codexSandbox', t: 'select', l: 'سندباکس تستر (موتور Codex) هنگام تست', o: [['workspace-write', 'workspace-write — می‌تواند تست اجرا کند'], ['read-only', 'read-only — فقط خواندن']] },
     { k: 'finalReport', t: 'bool', l: 'گزارش نهایی در پایان هر اجرا (هزینه، زمان، فایل‌ها، تست‌ها)' },
   ] },
   { title: 'ایمنی', icon: 'shield', fields: [
-    { k: 'claudePermission', t: 'select', l: 'مجوز Claude (سازنده)', o: [['acceptEdits', 'acceptEdits — ویرایش آزاد، فقط دستورات مجاز'], ['bypassPermissions', 'bypassPermissions — همه‌چیز بدون سؤال'], ['default', 'default — محدودترین']], h: 'bypassPermissions فقط برای پروژه‌هایی که به آن‌ها اعتماد دارید.' },
-    { k: 'claudeAllowedBash', t: 'lines', l: 'دستوراتی که Claude بدون تأیید اجرا می‌کند (هر خط یک پیشوند)', h: 'مثلاً «npm test» اجازه‌ی npm test و npm test -- --watch=false را می‌دهد.' },
+    { k: 'claudePermission', t: 'select', l: 'مجوز سازنده برای ویرایش فایل و اجرای دستور', o: [['acceptEdits', 'acceptEdits — ویرایش آزاد، فقط دستورات مجاز'], ['bypassPermissions', 'bypassPermissions — همه‌چیز بدون سؤال'], ['default', 'default — محدودترین']], h: 'bypassPermissions فقط برای پروژه‌هایی که به آن‌ها اعتماد دارید.' },
+    { k: 'claudeAllowedBash', t: 'lines', l: 'دستوراتی که سازنده بدون تأیید اجرا می‌کند (هر خط یک پیشوند)', h: 'مثلاً «npm test» اجازه‌ی npm test و npm test -- --watch=false را می‌دهد.' },
     { k: 'projectLock', t: 'bool', l: 'قفل پروژه: در هر لحظه فقط یک اجرا روی هر پروژه (بقیه منتظر می‌مانند)' },
     { k: 'guardReviewerEdits', t: 'select', l: 'اگر تستر فایلی را تغییر داد', o: [['warn', 'هشدار بده'], ['revert', 'خودکار برگردان'], ['off', 'کاری نکن']] },
     { k: 'requireToken', t: 'bool', global: 1, l: 'توکن دسترسی لازم باشد (جلوی برنامه‌های دیگرِ همین کامپیوتر را می‌گیرد)', h: 'بعد از فعال شدن، فقط این مرورگر (و لینک چاپ‌شده در ترمینال) دسترسی دارد.' },
@@ -962,13 +963,13 @@ function renderSubagents() {
   ul.innerHTML = S.subagents.length ? S.subagents.map(a => `<li data-sub="${esc(a.id)}" class="${a.enabled ? '' : 'off'}" title="${esc(a.description || a.prompt.slice(0, 200))}">
       <input type="checkbox" data-toggle="${esc(a.id)}" ${a.enabled ? 'checked' : ''} title="فعال/غیرفعال">
       <span>${esc(a.icon)}</span><span class="name" dir="ltr" style="text-align:right">${esc(a.name)}</span>
-      ${(a.skills || []).length ? `<span class="skc" title="اسکیل‌ها">${ic('puzzle', 'sm')}${(a.skills.length).toLocaleString('fa-IR')}</span>` : ''}<span class="stage ${a.stage}">${STAGE[a.stage]}${a.stage === 'review' ? ' · ' + (a.engine === 'codex' ? 'Codex' : 'Claude') : ''}</span></li>`).join('')
+      ${(a.skills || []).length ? `<span class="skc" title="اسکیل‌ها">${ic('puzzle', 'sm')}${(a.skills.length).toLocaleString('fa-IR')}</span>` : ''}<span class="stage ${a.stage}" title="${a.stage === 'review' ? 'اجرا با: ' + esc(subRunnerLabel(a)) : 'داخل نشست سازنده اجرا می‌شود'}">${STAGE[a.stage]}${a.stage === 'review' ? ' · ' + esc(subRunnerShort(a)) : ''}</span></li>`).join('')
     : '<li class="empty">ساب‌ایجنتی تعریف نشده.</li>';
   $('#mentions').innerHTML = S.subagents.map(a => `<button type="button" data-mention="${esc(a.name)}">${esc(a.icon)} @${esc(a.name)}</button>`).join('');
 }
 function subagentDialog(a, draft) {
   const isNew = !a;
-  a = a || { name: '', icon: '🤖', engine: 'claude', stage: 'review', enabled: true, description: '', prompt: '', skills: [] };
+  a = a || { name: '', icon: '🤖', engine: 'claude', model: '', stage: 'review', enabled: true, description: '', prompt: '', skills: [] };
   const v = { ...a, skills: a.skills || [], ...(draft || {}) };
   const kb = n => (n / 1024).toLocaleString('fa-IR', { maximumFractionDigits: 1 });
   const skillRows = (S.skills || []).length ? S.skills.map(s => `
@@ -991,8 +992,8 @@ function subagentDialog(a, draft) {
           <option value="review">تستر موازی — هر دور بررسی، کنار Codex اجرا می‌شود و باگ‌هایش به لیست رفع اضافه می‌شود</option>
           <option value="builder">کمکِ سازنده — Claude هنگام نوشتن کد می‌تواند کار را به او بسپارد</option>
         </select></div>
-      <div class="field" style="flex:0 0 130px"><label>موتور</label>
-        <select id="aEngine"><option value="claude">Claude</option><option value="codex">Codex</option></select></div>
+      <div class="field" style="flex:1 1 220px"><label>اجرا با</label>
+        <select id="aModel" dir="auto">${subRunnerOptions(v).map(([val, lab]) => `<option value="${esc(val)}">${esc(lab)}</option>`).join('')}</select></div>
     </div>
     <div class="field"><label>توضیح کوتاه (برای «کمکِ سازنده»: Claude از روی این تصمیم می‌گیرد کی صدایش کند)</label><input id="aDesc" value="${esc(v.description)}"></div>
     <div class="field"><label>دستورالعمل (system prompt)</label><textarea id="aPrompt" placeholder="You are a database specialist. Check migrations, indexes, transactions...">${esc(v.prompt)}</textarea></div>
@@ -1012,12 +1013,12 @@ function subagentDialog(a, draft) {
       <button class="btn ghost" value="cancel">انصراف</button>
       ${isNew ? '<button class="btn ghost" id="aReset" style="margin-inline-start:auto">بازگردانی پیش‌فرض‌ها</button>' : '<button class="btn ghost danger" id="aDel" style="margin-inline-start:auto">حذف</button>'}
     </div>`, true);
-  $('#aStage').value = v.stage; $('#aEngine').value = v.engine;
-  const syncEngine = () => { const b = $('#aStage').value === 'builder'; $('#aEngine').disabled = b; if (b) $('#aEngine').value = 'claude'; };
+  $('#aStage').value = v.stage; $('#aModel').value = subSpec(v);
+  const syncEngine = () => { const b = $('#aStage').value === 'builder'; $('#aModel').disabled = b; if (b) $('#aModel').value = ''; $('#aModel').title = b ? 'ساب‌ایجنت‌های «کمک سازنده» داخل نشست خود سازنده اجرا می‌شوند' : ''; };
   $('#aStage').onchange = syncEngine; syncEngine();
   // Current form state, so sub-dialogs (new/import/edit skill) can come back to it.
   const readForm = () => ({
-    icon: $('#aIcon').value, name: $('#aName').value, stage: $('#aStage').value, engine: $('#aEngine').value,
+    icon: $('#aIcon').value, name: $('#aName').value, stage: $('#aStage').value, model: $('#aModel').value, engine: $('#aModel').value === 'engine:codex' ? 'codex' : 'claude',
     description: $('#aDesc').value, prompt: $('#aPrompt').value, enabled: $('#aEnabled').checked,
     skills: [...document.querySelectorAll('#dlgBody [data-skill]:checked')].map(x => x.dataset.skill),
   });
@@ -1159,7 +1160,7 @@ async function setupDialog(opts = {}) {
       <div class="wz-item ${c.connected ? 'ok' : ''}">
         <div class="wz-icon claude">${ic(c.connected ? 'circle-check' : 'bot')}</div>
         <div class="wz-body">
-          <h4>Claude <small class="help">سازنده — کد را می‌نویسد</small></h4>
+          <h4>Claude <small class="help">حساب Anthropic — موتور Claude Code</small></h4>
           ${!c.installed ? `${okState(false, '', 'Claude CLI نصب نیست')}
             <div class="row-gap"><button type="button" class="btn btn-primary btn-sm" data-install="claude">${ic('download')}نصب Claude CLI</button></div>
             <div class="wz-note">${ic('info', 'sm')}نصب‌کننده‌ی رسمی در یک پنجره باز می‌شود. بعد از پایان، «بررسی دوباره» را بزنید.</div>`
@@ -1180,7 +1181,7 @@ async function setupDialog(opts = {}) {
       <div class="wz-item ${x.connected ? 'ok' : ''}">
         <div class="wz-icon codex">${ic(x.connected ? 'circle-check' : 'scan-search')}</div>
         <div class="wz-body">
-          <h4>Codex <small class="help">تحلیلگر و تستر</small></h4>
+          <h4>Codex <small class="help">حساب OpenAI / ChatGPT — موتور Codex</small></h4>
           ${!x.installed ? `${okState(false, '', 'Codex CLI نصب نیست')}
             ${st.node.npm ? `<div class="row-gap"><button type="button" class="btn btn-primary btn-sm" data-install="codex">${ic('download')}نصب Codex CLI</button></div>`
               : `<div class="wz-note">${ic('info', 'sm')}<span>برای نصب Codex اول Node.js لازم است.</span></div><div class="row-gap"><button type="button" class="btn btn-secondary btn-sm" data-install="node">${ic('external-link')}دانلود Node.js</button></div>`}
@@ -1824,6 +1825,7 @@ function renderRoles() {
   const sub = document.getElementById('brandSub');
   if (sub) sub.textContent = `${b} می‌سازد · ${r} تست می‌کند`;
   const p = homeEl('#homeRoles');
+  if (S.subagents) renderSubagents();
   if (p) p.textContent = `${b} کد را می‌نویسد، ${r} تحلیل و تست می‌کند و باگ‌ها را گزارش می‌دهد، و ${b} آن‌ها را رفع می‌کند — تا وقتی ${r} تأیید کند.`;
 }
 
@@ -1913,4 +1915,33 @@ async function providerDialog(id) {
     try { await api('/providers/' + p.id, { method: 'DELETE' }); S.providers = await api('/providers'); toast('حذف شد'); renderAgents(); renderModelBar(); setupDialog(); } catch (e) { toast(e.message, true); }
   };
   $('#pvBack').onclick = () => setupDialog();
+}
+
+// ---------- sub-agents: who runs each one ----------
+function subSpec(a) { return a.model !== undefined ? a.model : (a.engine === 'codex' ? 'engine:codex' : 'engine:claude'); }
+function subRunnerOptions(a) {
+  const st = S.settings || {};
+  const main = roleAgent('reviewer');
+  const opts = [['', `مثل تستر اصلی (${main.name})`], ['engine:claude', `Claude · ${prettyModel(st.specialistModel) || 'پیش‌فرض'}`], ['engine:codex', 'Codex (حساب شما)'],
+    ...claudeModels().map(([id, name]) => [id, name]),
+    ...(S.providers || []).flatMap(p => p.models.map(m => [`p:${p.id}:${m}`, `${p.name} · ${m}`]))];
+  const cur = subSpec(a);
+  if (cur && !opts.some(([v]) => v === cur)) opts.push([cur, prettyModel(cur) + (/^p:/.test(cur) ? ' (حذف‌شده)' : '')]);
+  return opts;
+}
+function subRunnerLabel(a) {
+  const spec = subSpec(a);
+  if (!spec) return `مثل تستر اصلی (${roleAgent('reviewer').name})`;
+  if (spec === 'engine:codex') return 'Codex';
+  if (spec === 'engine:claude') return `Claude · ${prettyModel((S.settings || {}).specialistModel) || 'پیش‌فرض'}`;
+  return prettyModel(spec);
+}
+// short label for the list: the agent's name only
+function subRunnerShort(a) {
+  const spec = subSpec(a);
+  if (!spec) return roleAgent('reviewer').name;
+  if (spec === 'engine:codex') return 'Codex';
+  const m = /^p:([a-z0-9-]+):/.exec(spec);
+  if (m) { const p = (S.providers || []).find(x => x.id === m[1]); return p ? p.name : m[1]; }
+  return prettyModel(spec === 'engine:claude' ? (S.settings || {}).specialistModel : spec).replace(/^Claude /, '') || 'Claude';
 }
