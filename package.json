@@ -57,7 +57,7 @@
         }
       ],
       "icon": "build/icon.ico",
-      "artifactName": "JARVIS-Setup-${version}.${ext}"
+      "artifactName": "JARVIS-Setup.${ext}"
     },
     "nsis": {
       "oneClick": false,
