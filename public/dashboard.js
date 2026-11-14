@@ -238,9 +238,9 @@ function providerData(data, S) {
   const codex = { model: 'codex', label: 'ChatGPT · Codex', tokens: cx.reduce((t, m) => t + m.tokens, 0),
     costUsd: cx.reduce((t, m) => t + (m.input * pIn + m.cacheRead * pC + m.output * pOut) / 1e6, 0), steps: cx.reduce((t, m) => t + m.steps, 0) };
   const cu = sum('custom');
-  const custom = { model: 'custom', label: 'سایر اتصال‌ها', tokens: cu.reduce((t, m) => t + m.tokens, 0), costUsd: 0, steps: cu.reduce((t, m) => t + m.steps, 0) };
+  const custom = { model: 'custom', label: 'سایر اتصال‌ها', tokens: cu.reduce((t, m) => t + m.tokens, 0), costUsd: cu.reduce((t, m) => t + (m.costUsd || 0), 0), steps: cu.reduce((t, m) => t + m.steps, 0) };
   const metric = D.metric === 'cost' && priced ? 'cost' : 'tokens';
-  return { rows: custom.tokens ? [claude, codex, custom] : [claude, codex], metric, priced, total: { tokens: claude.tokens + codex.tokens + custom.tokens, cost: claude.costUsd + codex.costUsd } };
+  return { rows: custom.tokens ? [claude, codex, custom] : [claude, codex], metric, priced, total: { tokens: claude.tokens + codex.tokens + custom.tokens, cost: claude.costUsd + codex.costUsd + custom.costUsd } };
 }
 function vsSection(data, S) {
   const vs = providerData(data, S);

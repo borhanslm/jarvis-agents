@@ -69,6 +69,49 @@ orch.authMethod = claudeAuthMethod;
 const { Providers, PRESETS } = require('./lib/providers');
 const providers = new Providers(DATA, setup.secrets);
 orch.resolveProvider = spec => providers.resolve(spec);
+
+// ---- phone notifications (Bale / Telegram bot) when a run finishes ----
+const notify = require('./lib/notify');
+const STATUS_FA = { done: '✅ تمام شد', error: '❌ خطا', stopped: '⏹ متوقف شد', budget: '💰 سقف هزینه', 'needs-attention': '⚠️ نیاز به بررسی', unverified: '❔ تست‌نشده' };
+orch.onFinish = (chat, final, info) => {
+  const s = store.settings(chat.projectId);
+  const token = setup.secrets.get('notifyToken');
+  if (!s.notifyPhone || !token || !s.notifyChatId) return;
+  if (s.notifyWhen === 'problems' && final === 'done') return;
+  const min = Math.round((info.durationMs || 0) / 60000);
+  const text = `${STATUS_FA[final] || final} — جارویس\n«${chat.title}»\nپروژه: ${info.project ? info.project.name : ''}\n⏱ ${min ? min + ' دقیقه' : 'کمتر از یک دقیقه'}${info.rounds ? ' · ' + info.rounds + ' دور' : ''}`;
+  notify.send({ channel: s.notifyPhone, token, chatId: s.notifyChatId, text }).catch(e => console.error('notify', e.message));
+};
+
+// ---- full trial of a connection: a tiny real task as builder, then as reviewer ----
+async function providerTrial(id, model) {
+  const pv = providers.resolve(`p:${id}:${model}`);
+  if (!pv || pv.missing) throw new Error('اتصال پیدا نشد');
+  if (!pv.hasKey) throw new Error('اول کلید API این اتصال را ذخیره کنید');
+  const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'jarvis-trial-'));
+  const runOne = (prompt, write) => {
+    const h = pv.engine === 'claude'
+      ? agents.runClaude({ cwd: dir, prompt, model: pv.model, extraEnv: pv.env, permissionMode: write ? 'acceptEdits' : 'default', lean: true,
+          tools: write ? ['Read', 'Write', 'Edit'] : ['Read', 'Glob'], allowedTools: write ? ['Read', 'Write', 'Edit'] : ['Read', 'Glob'], emit() {} })
+      : agents.runCodex({ cwd: dir, prompt, model: pv.model, extraEnv: pv.env, configArgs: pv.configArgs, sandbox: write ? 'workspace-write' : 'read-only', emit() {} });
+    const timer = setTimeout(() => h.kill(), 180000);
+    return h.promise.finally(() => clearTimeout(timer));
+  };
+  const out = { engine: pv.engine };
+  try {
+    let t = Date.now();
+    const b = await runOne('Create a file named hello.txt in the current folder whose entire content is exactly: hello from JARVIS\nThen reply with the single word DONE.', true);
+    let content = null; try { content = fs.readFileSync(path.join(dir, 'hello.txt'), 'utf8').trim(); } catch {}
+    const bOk = b.ok && /hello from jarvis/i.test(content || '');
+    out.builder = { ok: bOk, ms: Date.now() - t, error: bOk ? null : !b.ok ? String(b.error || 'خطا').slice(0, 400) : content === null ? 'مدل جواب داد ولی فایل را نساخت (ابزارها کار نکردند).' : 'فایل ساخته شد ولی محتوایش درست نبود.' };
+    if (!fs.existsSync(path.join(dir, 'hello.txt'))) fs.writeFileSync(path.join(dir, 'hello.txt'), 'hello from JARVIS\n');
+    t = Date.now();
+    const r = await runOne('Read the file hello.txt in the current folder. Reply ONLY with this JSON and nothing else: {"verdict":"pass","summary":"..."} if it contains the text "hello from JARVIS", otherwise {"verdict":"fail","summary":"..."}.', false);
+    const v = (String(r.text || '').match(/"verdict"\s*:\s*"(pass|fail)"/) || [])[1];
+    out.reviewer = { ok: r.ok && v === 'pass', ms: Date.now() - t, error: r.ok ? (v ? (v === 'pass' ? null : 'تستر نتیجه را اشتباه تشخیص داد.') : 'تستر جواب JSON نداد.') : String(r.error || 'خطا').slice(0, 400) };
+  } finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} }
+  return out;
+}
 let claudeReadyCache = { at: 0, ok: false };
 async function claudeReady() {
   if (Date.now() - claudeReadyCache.at < 60000) return claudeReadyCache.ok;
@@ -273,7 +316,24 @@ async function api(req, res, url) {
       if (!parts[1] && m === 'POST') return done(providers.save(body || {}));
       if (parts[1] === 'models' && m === 'POST') return send(res, 200, { models: await providers.models(body || {}) });
       if (parts[1] === 'test' && m === 'POST') return send(res, 200, await providers.test(body || {}));
+      if (parts[1] && parts[2] === 'trial' && m === 'POST') return send(res, 200, await providerTrial(parts[1], String(body.model || '')));
       if (parts[1] && !parts[2] && m === 'DELETE') { providers.remove(parts[1]); return done({ ok: true }); }
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
+  if (parts[0] === 'notify') {
+    try {
+      if (!parts[1] && m === 'GET') { const s = store.settings(); return send(res, 200, { channel: s.notifyPhone, chatId: s.notifyChatId, when: s.notifyWhen, hasToken: !!setup.secrets.get('notifyToken') }); }
+      if (!parts[1] && m === 'POST') {
+        const channel = ['bale', 'telegram'].includes(body.channel) ? body.channel : '';
+        if (typeof body.token === 'string' && body.token.trim()) { if (!notify.TOKEN_RE.test(body.token.trim())) throw new Error('توکن ربات معتبر نیست'); setup.secrets.set('notifyToken', body.token.trim()); }
+        if (body.clearToken) setup.secrets.set('notifyToken', null);
+        const out = store.updateSettings({ notifyPhone: channel, notifyChatId: String(body.chatId || '').trim().slice(0, 40), notifyWhen: body.when === 'problems' ? 'problems' : 'all' });
+        broadcast({ type: 'settings', settings: out });
+        return send(res, 200, { ok: true });
+      }
+      const token = (typeof body?.token === 'string' && body.token.trim()) || setup.secrets.get('notifyToken');
+      if (parts[1] === 'detect' && m === 'POST') return send(res, 200, await notify.detect({ channel: body.channel, token }));
+      if (parts[1] === 'test' && m === 'POST') return send(res, 200, await notify.send({ channel: body.channel, token, chatId: body.chatId, text: '🤖 جارویس: پیام آزمایشی. از این به بعد پایان کارها اینجا خبر داده می‌شود.' }));
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
   if (parts[0] === 'backup' && m === 'GET') return send(res, 200, store.backup());
@@ -386,8 +446,23 @@ async function api(req, res, url) {
         return send(res, 200, await graph.update(proj.path));
       }
     }
-    if (parts[2] === 'info') return send(res, 200, { ...(await git.info(proj.path)), exists: fs.existsSync(proj.path) });
+    if (parts[2] === 'info') return send(res, 200, { ...(await git.info(proj.path)), exists: fs.existsSync(proj.path), testCommand: require('./lib/testrun').detect(proj.path) });
     if (parts[2] === 'diff') return send(res, 200, { diff: await git.diff(proj.path) });
+    if (parts[2] === 'rules' && parts[3] === 'append' && m === 'POST') {
+      const items = (Array.isArray(body.items) ? body.items : []).map(x => String(x).replace(/\s+/g, ' ').trim().slice(0, 300)).filter(Boolean).slice(0, 20);
+      if (!items.length) return send(res, 400, { error: 'چیزی انتخاب نشده' });
+      const HEAD = '## آموخته‌های جارویس';
+      for (const f of ['CLAUDE.md', 'AGENTS.md']) {
+        const p = path.join(proj.path, f);
+        let t = ''; try { t = fs.readFileSync(p, 'utf8'); } catch {}
+        const add = items.filter(i => !t.includes(i)).map(i => '- ' + i);
+        if (!add.length) continue;
+        if (!t.includes(HEAD)) t = (t.trimEnd() ? t.trimEnd() + '\n\n' : '') + HEAD + '\n';
+        t = t.trimEnd() + '\n' + add.join('\n') + '\n';
+        fs.writeFileSync(p, t);
+      }
+      return send(res, 200, { ok: true, added: items.length });
+    }
     if (parts[2] === 'rules') {
       const files = { claude: path.join(proj.path, 'CLAUDE.md'), agents: path.join(proj.path, 'AGENTS.md') };
       if (m === 'GET') {
@@ -470,7 +545,7 @@ async function api(req, res, url) {
       const proj = store.project(chat.projectId);
       if (!proj) return send(res, 400, { error: 'پروژه‌ی این چت حذف شده' });
       if (chat.messages.length === 0 && chat.title === 'چت جدید') chat.title = text.replace(/\s+/g, ' ').slice(0, 48);
-      const mode = ['team', 'audit', 'plan', 'claude', 'codex'].includes(body.mode) ? body.mode : 'team';
+      const mode = ['team', 'audit', 'plan', 'claude', 'codex', 'compact', 'memory'].includes(body.mode) ? body.mode : 'team';
       if (body.models) store.setChatModels(chat, body.models);
       // Every mode except "codex only" needs Claude; say so up front instead of failing mid-run.
       if (needsClaudeAccount(chat, mode) && !(await claudeReady())) {

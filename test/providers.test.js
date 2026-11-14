@@ -113,3 +113,22 @@ test('review sub-agents run on whatever they are set to (main reviewer, Codex, a
   assert.equal(st.saveSubagent({ name: 'bad', prompt: 'x', stage: 'review', model: '"><img>' }).model, '');
   assert.equal(st.saveSubagent({ name: 'helper', prompt: 'x', stage: 'builder', model: 'p:ds:deepseek-chat' }).model, '');
 });
+
+test('full connection trial runs the real CLI as builder and reviewer', { timeout: 240000, skip: !agents.CLIS.claude && 'Claude CLI not installed' }, async () => {
+  const seen = [];
+  const srv = fakeAnthropic(seen);
+  await new Promise(r => srv.listen(0, '127.0.0.1', r));
+  const { spawn } = require('child_process');
+  const data = tmp('jarvis-trial-srv-');
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, JARVIS_PORT: '0', JARVIS_DATA: data }, stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    const port = await new Promise((res, rej) => { let out = ''; const t = setTimeout(() => rej(new Error(out)), 15000); child.stdout.on('data', d => { out += d; const m = out.match(/localhost:(\d+)\//); if (m) { clearTimeout(t); res(+m[1]); } }); });
+    const call = (p, body) => fetch(`http://127.0.0.1:${port}/api${p}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis': '1' }, body: JSON.stringify(body) }).then(r => r.json());
+    const pv = await call('/providers', { name: 'Mock', kind: 'anthropic', baseUrl: `http://127.0.0.1:${srv.address().port}`, models: 'mock-1', apiKey: 'sk-trial-1' });
+    const r = await call(`/providers/${pv.id}/trial`, { model: 'mock-1' });
+    // the fake API only answers in text (no tool calls), so the builder can't create the file; the reviewer answers JSON
+    assert.equal(r.builder.ok, false); assert.match(r.builder.error, /فایل/);
+    assert.equal(r.reviewer.ok, true);
+    assert.ok(seen.filter(x => x.url.startsWith('/v1/messages')).every(x => x.key === 'sk-trial-1'));
+  } finally { child.kill(); srv.close(); }
+});

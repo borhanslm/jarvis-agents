@@ -109,7 +109,7 @@ async function renderProjectInfo() {
     const i = await api(`/projects/${p.id}/info`);
     box.innerHTML = `<div class="path">${esc(p.path)}</div>
       ${!i.exists ? `<div class="pi-line pi-bad">${ic('circle-x')}پوشه وجود ندارد!</div>` : i.git
-        ? `<div class="pi-line">${ic('git-branch')}<b dir="ltr">${esc(i.branch)}</b> · ${i.changes.toLocaleString('fa-IR')} فایل تغییر کرده</div><div class="path">${esc(i.lastCommit)}</div>`
+        ? `${i.testCommand ? `<div class="pi-line">${ic('list-checks')}تست: <code dir="ltr">${esc(i.testCommand)}</code>${(S.settings || {}).testCommand || p.settings && p.settings.testCommand ? '' : ' <span class="help">(خاموش — در تنظیمات پروژه روشن کنید)</span>'}</div>` : ''}<div class="pi-line">${ic('git-branch')}<b dir="ltr">${esc(i.branch)}</b> · ${i.changes.toLocaleString('fa-IR')} فایل تغییر کرده</div><div class="path">${esc(i.lastCommit)}</div>`
         : `<div class="pi-line pi-warn">${ic('triangle-alert')}گیت نیست — نقطه‌ی بازگشت و نمایش تغییرات غیرفعال است.</div>`}
       <div class="row-gap">
         <button class="btn small ghost" data-psettings="1" title="تنظیمات اختصاصی همین پروژه">${ic('sliders-horizontal')}تنظیمات پروژه${p.settings ? ' •' : ''}</button>
@@ -185,7 +185,8 @@ function renderChatHead() {
   $('#chatTitle').textContent = c.title;
   const st = $('#chatStatus'); st.className = 'status-pill ' + c.status; st.textContent = STATUS[c.status] || c.status;
   const pro = S.claudeAuth === 'claude.ai';
-  $('#chatCost').textContent = `Claude: ${pro ? '≈' : ''}$${(c.cost?.claudeUsd || 0).toFixed(3)}${pro ? ' (معادل API)' : ''} · Codex: ${(c.cost?.codexTokens || 0).toLocaleString('fa-IR')} توکن`;
+  const usd = (c.cost?.claudeUsd || 0) + (c.cost?.otherUsd || 0);
+  $('#chatCost').textContent = `هزینه: ${pro || c.cost?.otherUsd ? '≈' : ''}$${usd.toFixed(3)}${pro ? ' (معادل API)' : ''}${c.cost?.codexTokens ? ` · توکن حساب ChatGPT: ${c.cost.codexTokens.toLocaleString('fa-IR')}` : ''}`;
   $('#chatCost').title = pro ? 'با اشتراک Pro/Max پولی پرداخت نمی‌شود؛ این فقط تخمین هزینه‌ی همین کار با API است.' : '';
   const running = c.status === 'running';
   $('#btnStop').hidden = !running;
@@ -281,6 +282,26 @@ function buildMessage(m) {
       return d;
     case 'review': return buildReview(m, who);
     case 'report': return buildReport(m);
+    case 'tests': {
+      const t = m.tests || {};
+      d.className = 'msg system';
+      d.innerHTML = `<div class="testcard ${t.ok ? 'ok' : 'bad'}"><div class="tc-head">${ic(t.ok ? 'circle-check' : 'circle-x')}<b>${t.ok ? 'تست‌های پروژه پاس شدند' : t.timedOut ? 'تست‌ها بیش از حد طول کشیدند' : 'تست‌های پروژه شکست خوردند'}</b><code dir="ltr">${esc(t.command)}</code><span class="help">${fa(Math.round((t.durationMs || 0) / 1000))} ثانیه</span></div>
+        ${t.output ? `<details ${t.ok ? '' : 'open'}><summary>خروجی</summary><pre dir="ltr">${esc(t.output)}</pre></details>` : ''}</div>`;
+      return d;
+    }
+    case 'summary':
+      d.className = 'msg system';
+      d.innerHTML = `<div class="sumcard"><div class="tc-head">${ic('layers')}<b>خلاصه‌ی گفتگو</b><span class="help">از اینجا ایجنت‌ها با نشست تازه و همین خلاصه ادامه می‌دهند.</span></div><div class="md">${md(m.text)}</div></div>`;
+      return d;
+    case 'memory': {
+      d.className = 'msg system';
+      const items = m.items || [];
+      d.innerHTML = `<div class="memcard" data-memproject="${esc(m.projectId || '')}"><div class="tc-head">${ic('lightbulb')}<b>پیشنهاد برای حافظه‌ی پروژه</b><span class="help">هر کدام را می‌خواهید تیک بزنید؛ به CLAUDE.md و AGENTS.md اضافه می‌شوند تا ایجنت‌ها دفعه‌ی بعد بدانند.</span></div>
+        ${items.length ? `<div class="mem-list">${items.map((x, i) => `<label class="check"><input type="checkbox" data-memitem="${i}" checked> <span dir="auto">${esc(x)}</span></label>`).join('')}</div>
+        <div class="row-gap"><button type="button" class="btn small primary" data-memsave="1">${ic('save', 'sm')}افزودن به قوانین پروژه</button></div>` : '<div class="help">پیشنهادی پیدا نشد.</div>'}</div>`;
+      d.querySelector('.memcard').dataset.items = JSON.stringify(items);
+      return d;
+    }
     case 'checkpoint':
       d.className = 'sys';
       d.innerHTML = `${ic('save')}<span class="status-text">${esc(m.text)}</span><button class="btn small ghost" data-restore="${esc(m.checkpoint)}">${ic('rotate-ccw')}بازگشت به این نقطه</button>`;
@@ -337,7 +358,7 @@ function selectProject(id) {
 async function openChat(id) {
   S.chat = await api('/chats/' + id);
   localStorage.setItem('jarvis.chat', id);
-  renderChats(); renderChatHead(); renderStream(); renderModelBar(); renderQuick(); clearAttachments();
+  renderChats(); renderChatHead(); renderStream(); renderModelBar(); renderQuick(); clearAttachments(); renderPresets();
   $('#sidebar').classList.remove('open');
   $('#input').focus();
 }
@@ -507,10 +528,18 @@ const SETTINGS_SCHEMA = [
     { k: 'builderEffort', t: 'select', l: 'میزان فکر سازنده', o: EFFORTS },
     { k: 'reviewerModel', t: 'model', m: 'claude', l: 'مدل تستر وقتی «تستر اصلی» روی Claude است', h: MODEL_HELP, ph: 'sonnet' },
     { k: 'reviewerEffort', t: 'select', l: 'میزان فکر تستر', o: EFFORTS },
+    { k: 'builderFallback', t: 'model', m: 'claude', l: 'جایگزین سازنده وقتی خطا داد', h: 'اگر سازنده خطا داد (قطعی سرویس، سقف مصرف، کلید)، همان مرحله یک بار با این مدل دوباره انجام می‌شود. پیش‌فرض = بدون جایگزین.' },
+    { k: 'reviewerFallback', t: 'model', m: 'codex', l: 'جایگزین تستر وقتی جوابی نداد', h: 'اگر تستر اصلی گزارشی نداد، بررسی یک بار با این مدل تکرار می‌شود.' },
+    { k: 'teamPresets', t: 'lines', l: 'ترکیب‌های ذخیره‌شده (هر خط: نام | سازنده | تستر)', h: 'با «ذخیره‌ی ترکیب فعلی…» در پایین کادر پیام اضافه می‌شوند. برای حذف، خطش را پاک کنید.' },
     { k: 'specialistModel', t: 'model', m: 'claude', l: 'مدل ساب‌ایجنت‌هایی که «اجرا با: Claude» دارند', h: 'هر ساب‌ایجنت را می‌توانید در ویرایش خودش روی هر مدل یا اتصالی بگذارید.', ph: 'haiku' },
     { k: 'specialistEffort', t: 'select', l: 'میزان فکر ساب‌ایجنت‌ها', o: EFFORTS },
     { k: 'codexModel', t: 'model', m: 'codex', l: 'مدل تستر اصلی (Codex یا یکی از اتصال‌ها)', h: 'پیش‌فرض = مدل تنظیم‌شده در ~/.codex/config.toml. اتصال‌هایی مثل DeepSeek هم اینجا هستند.' },
     { k: 'codexEffort', t: 'select', l: 'میزان فکر Codex', o: [['', 'پیش‌فرض'], ['minimal', 'minimal'], ['low', 'low'], ['medium', 'medium'], ['high', 'high']] },
+  ] },
+  { title: 'تست‌های پروژه', icon: 'list-checks', fields: [
+    { k: 'testCommand', t: 'text', ltr: 1, ph: 'auto', l: 'دستور تست پروژه (auto = تشخیص خودکار، خالی = خاموش)', h: 'جارویس بعد از هر دور، تست‌های خود پروژه را اجرا می‌کند و نتیجه را به تستر می‌دهد. مثلاً auto، npm test یا python -m pytest. بهتر است در «تنظیمات پروژه» بگذارید.' },
+    { k: 'testGate', t: 'bool', l: 'تا تست‌ها پاس نشده‌اند، کار تأیید نشود', h: 'اگر تست‌ها شکست بخورند، حتی اگر تستر تأیید کرده باشد، یک باگ «بحرانی» به فهرست رفع اضافه می‌شود.' },
+    { k: 'testTimeoutSec', t: 'number', step: 30, l: 'حداکثر زمان اجرای تست‌ها (ثانیه)' },
   ] },
   { title: 'جریان کار تیمی', icon: 'handshake', fields: [
     { k: 'maxRounds', t: 'number', step: 1, l: 'حداکثر دورهای «تست ← رفع»' },
@@ -560,7 +589,7 @@ function fieldHtml(f, v, isProject) {
   const help = f.h ? `<div class="help">${esc(f.h)}</div>` : '';
   if (f.t === 'bool') return `<label class="check"><input type="checkbox" data-k="${f.k}" ${v ? 'checked' : ''} ${dis}> ${esc(f.l)}</label>${help}`;
   let input;
-  if (f.t === 'model') input = `<select data-k="${f.k}" data-model="${f.m}" dir="ltr" ${dis}>${modelOptions(f.m, v).map(([val, lab]) => `<option value="${esc(val)}" ${String(v ?? '') === val ? 'selected' : ''}>${esc(lab)}</option>`).join('')}</select>`;
+  if (f.t === 'model') input = `<select data-k="${f.k}" data-model="${f.m}" dir="ltr" ${dis}>${modelOptions(f.m, v).map(([val, lab]) => [val, !val && /Fallback$/.test(f.k) ? 'بدون جایگزین' : lab]).map(([val, lab]) => `<option value="${esc(val)}" ${String(v ?? '') === val ? 'selected' : ''}>${esc(lab)}</option>`).join('')}</select>`;
   else if (f.t === 'select') input = `<select data-k="${f.k}" ${dis}>${f.o.map(([val, lab]) => `<option value="${esc(val)}" ${String(v ?? '') === val ? 'selected' : ''}>${esc(lab)}</option>`).join('')}</select>`;
   else if (f.t === 'long') input = `<textarea data-k="${f.k}" rows="4" ${f.ltr ? 'dir="ltr"' : 'dir="auto" class="prose"'} placeholder="${esc(f.ph || '')}" ${dis}>${esc(v || '')}</textarea>`;
   else if (f.t === 'lines') input = `<textarea data-k="${f.k}" rows="5" ${dis}>${esc((v || []).join('\n'))}</textarea>`;
@@ -681,7 +710,7 @@ function buildReport(m) {
       <div><span>زمان</span><b>${dur}</b></div>
       <div><span>دورها</span><b>${n(r.rounds)}</b></div>
       <div><span>هزینه (تخمینی)</span><b dir="ltr">$${(r.claudeUsd || 0).toFixed(3)}</b></div>
-      <div><span>توکن موتور Codex</span><b>${n(r.codexTokens)}</b></div>
+      ${r.codexTokens ? `<div><span>توکن حساب ChatGPT</span><b>${n(r.codexTokens)}</b></div>` : ''}
       <div><span>فایل‌های تغییرکرده</span><b>${n((r.files || []).length)}</b></div>
       ${r.openBugs ? `<div><span>باگ باز</span><b class="bad">${n(r.openBugs)}</b></div>` : ''}
     </div>
@@ -694,6 +723,7 @@ function buildReport(m) {
         acts.push(`<button class="btn small ghost" data-editlast="1">${ic('pencil', 'sm')}ویرایش آخرین پیام</button>`);
       }
       if (r.pendingCommit) acts.push(`<button class="btn small primary" data-commit="1">${ic('git-commit-horizontal', 'sm')}commit تغییرات</button><button class="btn small ghost" data-showdiff="1">${ic('file-diff', 'sm')}دیدن تغییرات</button>`);
+      if (r.status === 'done') acts.push(`<button class="btn small ghost" data-memory="1">${ic('lightbulb', 'sm')}پیشنهاد برای حافظه‌ی پروژه</button>`);
       if (r.status === 'done' && (r.branch || r.commit)) acts.push(`<button class="btn small ghost" data-pr="1">${ic('git-pull-request', 'sm')}ساخت Pull Request</button>`);
       return acts.length ? `<div class="rline ractions">${acts.join('')}</div>` : '';
     })()}
@@ -897,6 +927,15 @@ $('#stream').onclick = async e => {
     return;
   }
   if (S.chat && e.target.closest('[data-showdiff]')) return diffDialog();
+  if (S.chat && e.target.closest('[data-memory]')) return runSpecial('memory');
+  const ms = e.target.closest('[data-memsave]');
+  if (ms) {
+    const card = ms.closest('.memcard'); const items = JSON.parse(card.dataset.items || '[]');
+    const pick = [...card.querySelectorAll('[data-memitem]:checked')].map(x => items[+x.dataset.memitem]).filter(Boolean);
+    if (!pick.length) return toast('چیزی انتخاب نشده', true);
+    try { await api(`/projects/${card.dataset.memproject || S.chat.projectId}/rules/append`, { body: { items: pick } }); toast(`${fa(pick.length)} مورد به قوانین پروژه اضافه شد`); ms.disabled = true; ms.textContent = 'اضافه شد ✓'; } catch (err) { toast(err.message, true); }
+    return;
+  }
   const cm = e.target.closest('[data-commit]');
   if (S.chat && cm) {
     const msg = prompt('پیام commit:', `jarvis: ${S.chat.title}`);
@@ -1208,6 +1247,8 @@ async function setupDialog(opts = {}) {
 
       ${providersBlock()}
 
+      ${notifyBlock()}
+
       <div class="wz-item ${gfy.installed ? 'ok' : ''}">
         <div class="wz-icon">${ic(gfy.installed ? 'circle-check' : 'network')}</div>
         <div class="wz-body">
@@ -1226,6 +1267,7 @@ async function setupDialog(opts = {}) {
   try { localStorage.setItem('jarvis.setupSeen', '1'); } catch {}
   $('#wzRefresh').onclick = refresh;
   body.querySelectorAll('[data-addprov]').forEach(b => b.onclick = () => providerDialog());
+  body.querySelectorAll('[data-notify]').forEach(b => b.onclick = () => notifyDialog());
   body.querySelectorAll('[data-editprov]').forEach(b => b.onclick = () => providerDialog(b.dataset.editprov));
   $('#wzDone').onclick = () => { clearTimeout(setupPoll); $('#dlg').close(); };
   body.querySelectorAll('[data-install]').forEach(b => b.onclick = async () => {
@@ -1286,7 +1328,7 @@ window.prettyModel = prettyModel;
 // Options for a model <select>: default, the catalog, saved custom IDs, the current value, "custom…".
 function modelOptions(kind, value) {
   const cm = customModels(), s = S.settings || {};
-  const base = kind === 'claude' ? claudeModels() : [];
+  const base = claudeModels(); // both slots can run Claude models
   const def = kind === 'claude' ? 'پیش‌فرض CLI' : `پیش‌فرض · ${prettyModel(S.codexDefaultModel) || 'CLI'}`;
   const extra = [...cm[kind], value].filter(v => v && v !== '__custom' && !base.some(([i]) => i === v));
   const conn = (S.providers || []).flatMap(p => p.models.map(m => [`p:${p.id}:${m}`, `${p.name} · ${m}`]));
@@ -1322,7 +1364,7 @@ async function saveModelBar() {
   try {
     const r = await api(`/chats/${S.chat.id}/models`, { body: { models: readModelBar() } });
     S.chat.models = r.models;
-    renderAgents();
+    renderAgents(); renderPresets();
     lsSet('jarvis.models.last', r.models); // new chats start with the last choice
     if (r.running) toast('از اجرای بعدی اعمال می‌شود');
   } catch (e) { toast(e.message, true); renderModelBar(); }
@@ -1823,7 +1865,7 @@ function roleAgent(role) {
 function renderRoles() {
   const b = roleAgent('builder').name, r = roleAgent('reviewer').name;
   const sub = document.getElementById('brandSub');
-  if (sub) sub.textContent = `${b} می‌سازد · ${r} تست می‌کند`;
+  if (sub) sub.textContent = 'تیم ایجنت‌های برنامه‌نویس';
   const p = homeEl('#homeRoles');
   if (S.subagents) renderSubagents();
   if (p) p.textContent = `${b} کد را می‌نویسد، ${r} تحلیل و تست می‌کند و باگ‌ها را گزارش می‌دهد، و ${b} آن‌ها را رفع می‌کند — تا وقتی ${r} تأیید کند.`;
@@ -1863,8 +1905,13 @@ async function providerDialog(id) {
       <input id="pvKey" type="password" dir="ltr" autocomplete="off" placeholder="${p && p.hasKey ? 'کلید ذخیره شده — برای تغییر، کلید جدید را وارد کنید' : 'sk-…'}">
       <div class="help">${ic('lock', 'sm')} فقط روی همین کامپیوتر و رمزنگاری‌شده ذخیره می‌شود و فقط به همین سرویس فرستاده می‌شود. ورود Claude و ChatGPT شما هرگز به این سرویس داده نمی‌شود.</div></div>
     <div class="field"><label for="pvModels">مدل‌ها (با کاما جدا کنید)</label><input id="pvModels" dir="ltr" value="${esc((v.models || []).join(', '))}" placeholder="deepseek-chat, deepseek-reasoner">
-      <div class="row-gap"><button type="button" class="btn small" id="pvFetch">${ic('refresh-cw', 'sm')}دریافت فهرست مدل‌ها</button><button type="button" class="btn small" id="pvTest">${ic('zap', 'sm')}آزمایش اتصال</button></div>
+      <div class="row-gap"><button type="button" class="btn small" id="pvFetch">${ic('refresh-cw', 'sm')}دریافت فهرست مدل‌ها</button><button type="button" class="btn small" id="pvTest">${ic('zap', 'sm')}آزمایش اتصال</button>${p && p.hasKey ? `<button type="button" class="btn small" id="pvTrial" title="یک کار کوچک واقعی: یک بار در نقش سازنده (ساختن یک فایل) و یک بار در نقش تستر">${ic('play', 'sm')}آزمایش کامل (سازنده و تستر)</button>` : ''}</div>
       <div id="pvOut" class="help" role="status"></div></div>
+    <div class="field"><label>قیمت برای هر ۱ میلیون توکن (دلار، اختیاری — برای محاسبه‌ی هزینه)</label>
+      <div class="field-row"><div class="field"><label for="pvPin" class="help">ورودی</label><input id="pvPin" type="number" min="0" step="0.01" dir="ltr" value="${esc(v.priceIn || 0)}"></div>
+      <div class="field"><label for="pvPc" class="help">ورودی کش‌شده</label><input id="pvPc" type="number" min="0" step="0.01" dir="ltr" value="${esc(v.priceCached || 0)}"></div>
+      <div class="field"><label for="pvPout" class="help">خروجی</label><input id="pvPout" type="number" min="0" step="0.01" dir="ltr" value="${esc(v.priceOut || 0)}"></div></div>
+      <div class="help">قیمت‌ها را از صفحه‌ی قیمت خود سرویس بردارید. با ۰، فقط توکن‌ها شمرده می‌شوند.</div></div>
     </div>
     <div class="dlg-actions"><button type="button" class="btn primary" id="pvSave">${ic('save', 'sm')}ذخیره</button>
       ${p ? `<button type="button" class="btn danger" id="pvDel">${ic('trash-2', 'sm')}حذف</button>` : ''}
@@ -1885,7 +1932,19 @@ async function providerDialog(id) {
     $('#pvName').value = pr.name === 'سفارشی' ? '' : pr.name; $('#pvUrl').value = pr.baseUrl || ''; $('#pvModels').value = (pr.models || []).join(', ');
     document.querySelector(`input[name=pvKind][value=${pr.kind}]`).checked = true; syncHelp();
   };
-  const form = () => ({ id: p ? p.id : undefined, preset: p ? p.preset : $('#pvPreset').value, name: $('#pvName').value, kind: kind(), baseUrl: $('#pvUrl').value.trim().replace(/\/+$/, ''), models: $('#pvModels').value, apiKey: $('#pvKey').value.trim() });
+  const form = () => ({ id: p ? p.id : undefined, preset: p ? p.preset : $('#pvPreset').value, name: $('#pvName').value, kind: kind(), baseUrl: $('#pvUrl').value.trim().replace(/\/+$/, ''), models: $('#pvModels').value, apiKey: $('#pvKey').value.trim(), priceIn: +$('#pvPin').value || 0, priceCached: +$('#pvPc').value || 0, priceOut: +$('#pvPout').value || 0 });
+  if ($('#pvTrial')) $('#pvTrial').onclick = async () => {
+    const model = String($('#pvModels').value).split(/[,،\n]/)[0].trim();
+    if (!model) return out('اول یک مدل بنویسید.', true);
+    $('#pvTrial').disabled = true;
+    out(`در حال آزمایش کامل با <code dir="ltr">${esc(model)}</code>… (ممکن است یکی دو دقیقه طول بکشد؛ از اعتبار حسابتان مقدار خیلی کمی مصرف می‌شود)`);
+    try {
+      const r = await api(`/providers/${p.id}/trial`, { body: { model } });
+      const line = (name, x) => `<div>${ic(x.ok ? 'circle-check' : 'circle-x', 'sm')} <b>${name}:</b> ${x.ok ? `کار کرد (${fa(Math.round(x.ms / 1000))} ثانیه)` : esc(x.error || 'ناموفق')}</div>`;
+      out(line('سازنده', r.builder) + line('تستر', r.reviewer) + (r.builder.ok && r.reviewer.ok ? '<div>همه‌چیز درست است؛ این اتصال را برای هر دو نقش می‌توانید استفاده کنید.</div>' : ''), !(r.builder.ok && r.reviewer.ok));
+    } catch (e) { out(esc(e.message), true); }
+    $('#pvTrial').disabled = false;
+  };
   const out = (html, bad) => { $('#pvOut').innerHTML = html; $('#pvOut').className = 'help ' + (bad ? 'pi-bad' : ''); };
   $('#pvFetch').onclick = async () => {
     const f = form(); out('در حال دریافت…');
@@ -1943,4 +2002,108 @@ function subRunnerShort(a) {
   const m = /^p:([a-z0-9-]+):/.exec(spec);
   if (m) { const p = (S.providers || []).find(x => x.id === m[1]); return p ? p.name : m[1]; }
   return prettyModel(spec === 'engine:claude' ? (S.settings || {}).specialistModel : spec).replace(/^Claude /, '') || 'Claude';
+}
+
+// ---------- summary / project memory runs ----------
+async function runSpecial(mode) {
+  if (!S.chat) return;
+  if (S.chat.status === 'running' || S.chat.status === 'waiting') return toast('صبر کنید کار فعلی تمام شود', true);
+  const text = mode === 'compact' ? 'گفتگو را خلاصه کن و با نشست تازه ادامه بده' : 'از این گفتگو، قانون‌ها و نکته‌های ماندگار این پروژه را پیشنهاد بده';
+  try { await api(`/chats/${S.chat.id}/send`, { body: { text, mode } }); }
+  catch (err) { toast(err.message, true); if (err.data && err.data.needSetup) setupDialog(); }
+}
+$('#btnCompact').onclick = () => {
+  if (!S.chat || !S.chat.messages.length) return toast('این گفتگو هنوز چیزی برای خلاصه کردن ندارد');
+  if (confirm('سازنده کل گفتگو را خلاصه می‌کند و از این به بعد همه‌ی ایجنت‌ها با نشست تازه و همین خلاصه ادامه می‌دهند. ادامه می‌دهید؟')) runSpecial('compact');
+};
+
+// ---------- team presets (builder + reviewer in one click) ----------
+function builtinPresets() {
+  const out = [
+    { name: 'قوی: Claude Opus 5.5 + Codex', builder: 'claude-opus-5-5', reviewer: '' },
+    { name: 'متعادل: Claude Sonnet 5.5 + Codex', builder: 'claude-sonnet-5-5', reviewer: '' },
+    { name: 'اقتصادی: Claude Haiku 5.5 + Codex', builder: 'claude-haiku-5-5', reviewer: '' },
+    { name: 'فقط Claude: Sonnet می‌سازد، Opus تست می‌کند', builder: 'claude-sonnet-5-5', reviewer: 'claude-opus-5-5' },
+  ];
+  for (const p of S.providers || []) {
+    if (!p.models.length) continue;
+    const m = `p:${p.id}:${p.models[0]}`;
+    out.push({ name: `${p.name} برای هر دو نقش`, builder: m, reviewer: m });
+    out.push({ name: `${p.name} می‌سازد + Codex`, builder: m, reviewer: '' });
+  }
+  return out;
+}
+function savedPresets() {
+  return ((S.settings && S.settings.teamPresets) || []).map(line => { const [name, builder, reviewer] = line.split('|').map(x => x.trim()); return name ? { name, builder: builder || '', reviewer: reviewer || '', saved: true } : null; }).filter(Boolean);
+}
+function renderPresets() {
+  const sel = $('#mPreset');
+  if (!sel) return;
+  const m = (S.chat && S.chat.models) || {};
+  const all = [...savedPresets(), ...builtinPresets()];
+  const cur = all.findIndex(p => (p.builder || '') === (m.builderModel || '') && (p.reviewer || '') === (m.codexModel || ''));
+  sel.innerHTML = `<option value="">ترکیب تیم…</option>` + all.map((p, i) => `<option value="${i}" ${i === cur ? 'selected' : ''}>${p.saved ? '★ ' : ''}${esc(p.name)}</option>`).join('') + '<option value="__save">ذخیره‌ی ترکیب فعلی…</option>';
+  sel.dataset.list = JSON.stringify(all);
+}
+document.addEventListener('change', async e => {
+  if (e.target.id !== 'mPreset' || !S.chat) return;
+  const sel = e.target, v = sel.value, all = JSON.parse(sel.dataset.list || '[]');
+  if (v === '__save') {
+    const name = (prompt('اسم این ترکیب:') || '').replace(/\|/g, ' ').trim();
+    if (name) {
+      const m = S.chat.models || {};
+      const lines = [...((S.settings || {}).teamPresets || []).filter(l => l.split('|')[0].trim() !== name), `${name} | ${m.builderModel || ''} | ${m.codexModel || ''}`];
+      try { S.settings = await api('/settings', { body: { teamPresets: lines } }); toast(`ترکیب «${name}» ذخیره شد`); } catch (err) { toast(err.message, true); }
+    }
+    return renderPresets();
+  }
+  const p = all[+v];
+  if (!p) return;
+  S.chat.models = { ...(S.chat.models || {}), builderModel: p.builder, codexModel: p.reviewer };
+  renderModelBar(); await saveModelBar(); toast(`ترکیب: ${p.name}`);
+});
+
+// ---------- phone notifications (Bale / Telegram) ----------
+function notifyBlock() {
+  const st = S.settings || {};
+  const on = !!(st.notifyPhone && st.notifyChatId);
+  return `<div class="wz-item ${on ? 'ok' : ''}">
+    <div class="wz-icon">${ic('bell')}</div>
+    <div class="wz-body"><h4>اعلان روی گوشی <small class="help">بله یا تلگرام</small></h4>
+      ${on ? `<span class="wz-state ok">${ic('circle-check', 'sm')}روشن · ${st.notifyPhone === 'bale' ? 'بله' : 'تلگرام'}</span>` : '<span class="help">وقتی کاری تمام شد، به گوشی‌تان پیام می‌دهد.</span>'}
+      <div class="row-gap"><button type="button" class="btn btn-secondary btn-sm" data-notify="1">${ic('bell')}${on ? 'تنظیم' : 'راه‌اندازی'}</button></div></div></div>`;
+}
+async function notifyDialog() {
+  let cur = {}; try { cur = await api('/notify'); } catch {}
+  dialog(`<div class="dlg-scroll"><h3>${ic('bell')}اعلان روی گوشی</h3>
+    <ol class="help nt-steps">
+      <li>در بله یا تلگرام به <b dir="ltr">@BotFather</b> پیام بدهید، <code>/newbot</code> را بفرستید و یک ربات بسازید. توکنی که می‌دهد را کپی کنید.</li>
+      <li>ربات تازه‌تان را باز کنید و یک پیام (مثلاً «سلام») برایش بفرستید.</li>
+      <li>این‌جا کانال و توکن را وارد کنید و «پیدا کردن خودکار» را بزنید، بعد «پیام آزمایشی».</li>
+    </ol>
+    <div class="field"><label for="ntCh">کانال</label><select id="ntCh"><option value="">خاموش</option><option value="bale">بله</option><option value="telegram">تلگرام</option></select></div>
+    <div class="field"><label for="ntTok">توکن ربات</label><input id="ntTok" type="password" dir="ltr" autocomplete="off" placeholder="${cur.hasToken ? 'توکن ذخیره شده — برای تغییر، توکن جدید را وارد کنید' : '123456:ABC…'}"><div class="help">${ic('lock', 'sm')} رمزنگاری‌شده و فقط روی همین کامپیوتر ذخیره می‌شود.</div></div>
+    <div class="field"><label for="ntChat">شناسه‌ی گفتگو (chat id)</label><input id="ntChat" dir="ltr" value="${esc(cur.chatId || '')}">
+      <div class="row-gap"><button type="button" class="btn small" id="ntDetect">${ic('search', 'sm')}پیدا کردن خودکار</button><button type="button" class="btn small" id="ntTest">${ic('send', 'sm')}پیام آزمایشی</button></div>
+      <div id="ntOut" class="help" role="status"></div></div>
+    <div class="field"><label for="ntWhen">کی خبر بدهد</label><select id="ntWhen"><option value="all">پایان هر کار</option><option value="problems">فقط وقتی مشکلی بود</option></select></div>
+    <p class="help">فقط وضعیت کار (تمام شد / خطا)، اسم گفتگو و مدت زمان فرستاده می‌شود؛ هیچ کدی فرستاده نمی‌شود.</p></div>
+    <div class="dlg-actions"><button type="button" class="btn primary" id="ntSave">${ic('save', 'sm')}ذخیره</button><button type="button" class="btn ghost" id="ntBack">بازگشت</button></div>`);
+  $('#ntCh').value = cur.channel || ''; $('#ntWhen').value = cur.when || 'all';
+  const out = (h, bad) => { $('#ntOut').innerHTML = h; $('#ntOut').className = 'help ' + (bad ? 'pi-bad' : ''); };
+  const f = () => ({ channel: $('#ntCh').value, token: $('#ntTok').value.trim(), chatId: $('#ntChat').value.trim(), when: $('#ntWhen').value });
+  $('#ntDetect').onclick = async () => {
+    if (!f().channel) return out('اول کانال را انتخاب کنید.', true);
+    out('در حال جستجو…');
+    try { const r = await api('/notify/detect', { body: f() }); $('#ntChat').value = r.chatId; out(`پیدا شد: ${esc(r.name || r.chatId)}`); } catch (e) { out(esc(e.message), true); }
+  };
+  $('#ntTest').onclick = async () => {
+    if (!f().channel) return out('اول کانال را انتخاب کنید.', true);
+    out('در حال ارسال…');
+    try { await api('/notify/test', { body: f() }); out('پیام فرستاده شد؛ گوشی‌تان را نگاه کنید.'); } catch (e) { out(esc(e.message), true); }
+  };
+  $('#ntSave').onclick = async () => {
+    try { await api('/notify', { body: f() }); S.settings = await api('/settings', { body: {} }); toast('ذخیره شد'); setupDialog(); } catch (e) { out(esc(e.message), true); }
+  };
+  $('#ntBack').onclick = () => setupDialog();
 }

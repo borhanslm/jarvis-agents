@@ -146,6 +146,9 @@
         <button class="btn btn-ghost btn-sm" id="btnDiff" type="button" title="تغییرات فعلی پروژه، فایل به فایل">
           <svg class="ic" aria-hidden="true"><use href="icons.svg#i-file-diff" /></svg><span>تغییرات</span>
         </button>
+        <button class="btn btn-ghost btn-sm" id="btnCompact" type="button" title="گفتگو را خلاصه می‌کند و با نشست تازه ادامه می‌دهد؛ ارزان‌تر و سریع‌تر برای گفتگوهای طولانی">
+          <svg class="ic" aria-hidden="true"><use href="icons.svg#i-layers" /></svg><span>خلاصه و ادامه</span>
+        </button>
         <button class="btn btn-ghost btn-sm" id="btnReset" type="button" title="شروع نشست تازه برای همه‌ی ایجنت‌ها">
           <svg class="ic" aria-hidden="true"><use href="icons.svg#i-rotate-ccw" /></svg><span>نشست تازه</span>
         </button>
@@ -231,6 +234,7 @@
         <textarea id="input" rows="2" placeholder="به جارویس بگویید چه بسازد یا چه چیزی را بررسی کند…" dir="auto"></textarea>
         <div class="composer-bottom">
           <div class="model-bar" id="modelBar" role="group" aria-label="مدل‌های این گفتگو" title="مدل‌های همین گفتگو — از اجرای بعدی اعمال می‌شود. Ctrl+Enter برای ارسال">
+            <span class="mpick preset"><svg class="ic sm" aria-hidden="true"><use href="icons.svg#i-users" /></svg><select id="mPreset" aria-label="ترکیب تیم" title="ترکیب‌های آماده‌ی سازنده و تستر"></select></span>
             <span class="mpick claude"><i class="agent-dot claude" aria-hidden="true"></i>
               <select id="mClaude" aria-label="مدل سازنده" title="سازنده"></select><select id="mClaudeEffort" aria-label="میزان فکر سازنده"></select></span>
             <span class="mpick codex"><i class="agent-dot codex" aria-hidden="true"></i>
