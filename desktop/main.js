@@ -2,6 +2,11 @@
 // Runs the local server in-process (127.0.0.1 only) and shows the panel in a window.
 // Everything stays on this computer: data lives in %APPDATA%\JARVIS\data.
 'use strict';
+const electron = require('electron');
+// voice: audio capture and timers must keep running while the window is hidden or covered
+electron.app.commandLine.appendSwitch('disable-background-timer-throttling');
+electron.app.commandLine.appendSwitch('disable-renderer-backgrounding');
+electron.app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 const { app, BrowserWindow, shell, nativeTheme, Menu, dialog, ipcMain, session, Tray, globalShortcut, Notification } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -128,6 +133,7 @@ if (!app.requestSingleInstanceLock()) {
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
         contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false,
+        backgroundThrottling: false, // the voice assistant keeps listening for "Hey JARVIS" when hidden
       },
     });
     win.loadURL(`${origin}/?token=${encodeURIComponent(token)}`);
@@ -187,6 +193,15 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   ipcMain.on('jarvis:desktop-settings', () => applyDesktopSettings());
+  // Voice assistant while the window is hidden: the answer is spoken, and also shown as a Windows notification
+  ipcMain.on('jarvis:voice', (_e, ev) => {
+    if (!ev || typeof ev !== 'object') return;
+    if (tray && ev.state) tray.setToolTip(ev.state === 'off' ? 'JARVIS' : 'JARVIS — ' + String(ev.label || '').slice(0, 60));
+    if (ev.reply && win && (!win.isVisible() || win.isMinimized() || !win.isFocused()) && Notification.isSupported()) {
+      const n = new Notification({ title: 'JARVIS', body: String(ev.reply).slice(0, 240), silent: true });
+      n.on('click', showWin); n.show();
+    }
+  });
   // Custom title bar buttons.
   ipcMain.on('jarvis:win', (e, action) => {
     const w = BrowserWindow.fromWebContents(e.sender);

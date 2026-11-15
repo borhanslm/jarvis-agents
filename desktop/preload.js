@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('jarvisDesktop', {
   appInfo: () => ipcRenderer.invoke('jarvis:app-info'),
   updateAction: a => ipcRenderer.send('jarvis:update', a === 'install' ? 'install' : 'check'),
   onUpdate: cb => ipcRenderer.on('jarvis:update-state', (_e, s) => cb(s || {})),
+  // voice assistant state / spoken reply (tray tooltip + notification while the window is hidden)
+  voice: ev => ipcRenderer.send('jarvis:voice', { state: String(ev && ev.state || ''), label: String(ev && ev.label || '').slice(0, 80), reply: ev && ev.reply ? String(ev.reply).slice(0, 400) : '' }),
   // custom title bar
   minimize: () => ipcRenderer.send('jarvis:win', 'minimize'),
   toggleMaximize: () => ipcRenderer.send('jarvis:win', 'toggle-max'),

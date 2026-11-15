@@ -160,6 +160,7 @@ async function ask(text) {
 function handleReply(r) {
   if (r.brain) setNet(!r.brain.offline, r.brain.offline);
   if (r.say) addLog('jarvis', r.say);
+  if (r.say && window.jarvisDesktop && window.jarvisDesktop.voice) window.jarvisDesktop.voice({ state: 'speaking', label: 'در حال صحبت', reply: r.say });
   if (r.result) doResult(r.result);
   renderConfirm(r.confirm ? r.action : null);
   speakText(r.say, { thenListen: r.confirm || /[?؟]\s*$/.test(r.say || '') });
@@ -234,6 +235,7 @@ function setState(s, hint) {
   el.querySelector('#vdState').textContent = STATE_FA[s] + (s === 'idle' && settings().voiceWake === false ? '' : '');
   if (s === 'idle' && settings().voiceWake === false) el.querySelector('#vdState').textContent = 'آماده — Ctrl+Space یا دکمه‌ی میکروفون';
   if (hint !== undefined) setHint(hint);
+  if (window.jarvisDesktop && window.jarvisDesktop.voice) window.jarvisDesktop.voice({ state: s, label: STATE_FA[s] });
   const b = $('#btnVoice'); if (b) { b.classList.toggle('on', s !== 'off'); b.dataset.state = s; b.title = s === 'off' ? 'دستیار صوتی (خاموش)' : 'دستیار صوتی — ' + STATE_FA[s] + ' · میکروفون روشن است'; }
 }
 // online / offline badge on the dock
@@ -298,8 +300,9 @@ async function start(talkNow) {
     if (!settings().voiceEnabled) await api('/settings', { body: { voiceEnabled: true } });
     ui(); setState('idle', 'در حال آماده شدن…');
     await startMic();
-    const st = await api('/voice/status');
+    let st = await api('/voice/status');
     V.localStt = st.stt.local; V.gpu = st.stt.gpu;
+    if (await autoSetup(st)) st = await api('/voice/status');
     setNet(st.online, false);
     api('/voice/warm', { body: {} }).catch(() => {}); // load the offline model in the background
     if (settings().voiceWake !== false && st.assets.wakeword.installed) await loadWakeWord();
@@ -310,6 +313,33 @@ async function start(talkNow) {
     window.toast && window.toast(e.name === 'NotAllowedError' ? 'اجازه‌ی میکروفون داده نشد.' : e.name === 'NotFoundError' ? 'میکروفونی پیدا نشد.' : 'دستیار صوتی: ' + e.message, true);
   }
 }
+// First run: download the parts the assistant needs to listen and answer offline (once; official sources).
+// "Hey JARVIS" (4 MB) first so wake-up works at once; then speech engine, accurate Persian model, voice.
+const ESSENTIAL = ['wakeword', 'whisper-bin', 'piper-bin', 'voice-fa-amir', 'voice-en-lessac', 'whisper-turbo'];
+async function autoSetup(st) {
+  if (settings().voiceAutoSetup) return false;
+  const missing = ESSENTIAL.filter(id => st.assets[id] && !st.assets[id].installed && !st.assets[id].downloading);
+  try { S.settings = await api('/settings', { body: { voiceAutoSetup: true } }); } catch {}
+  if (!missing.length) return false;
+  for (const id of missing) { try { await api('/voice/download', { body: { id } }); } catch {} }
+  V.setupIds = missing;
+  setHint('دستیار صوتی در حال آماده شدن است (دانلود اجزای آفلاین، فقط بار اول)…');
+  return true;
+}
+// progress of the first-run download on the dock, and switch things on as parts arrive
+window.addEventListener('jarvis:ev', async e => {
+  const ev = e.detail;
+  if (ev.type !== 'voiceAssets' || !V.setupIds || V.state === 'off') return;
+  const a = ev.assets, ids = V.setupIds;
+  const tot = ids.reduce((t, id) => t + (a[id].total || a[id].size || 0), 0), got = ids.reduce((t, id) => t + (a[id].installed ? (a[id].size || 0) : a[id].got || 0), 0);
+  if (a.wakeword && a.wakeword.installed && !V.ww && settings().voiceWake !== false) { try { await loadWakeWord(); } catch {} }
+  if (ids.every(id => a[id].installed || a[id].error)) {
+    V.setupIds = null;
+    const st = await api('/voice/status'); V.localStt = st.stt.local;
+    setHint(ids.some(id => a[id].error) ? 'بعضی اجزا دانلود نشدند؛ از تنظیمات صدا دوباره امتحان کنید.' : 'دستیار صوتی آماده است. بگویید «هی جارویس».');
+  } else if (V.state === 'idle') setHint('آماده‌سازی دستیار صوتی (فقط بار اول): ' + fa(Math.round(got / Math.max(1, tot) * 100)) + '٪');
+});
+
 async function stop() {
   stopSpeaking(); stopMic(); setState('off');
   try { await api('/settings', { body: { voiceEnabled: false } }); } catch {}
