@@ -88,6 +88,7 @@ const { Speech } = require('./lib/voice/speech');
 const openaiTarget = () => { const p = providers.view().find(x => x.kind === 'openai' && x.hasKey && /api\.openai\.com/.test(x.baseUrl)); return p ? { baseUrl: p.baseUrl, key: providers.key(p.id) } : null; };
 const speech = new Speech({ assets: voiceAssets, apiTarget: openaiTarget });
 const net = require('./lib/net');
+const system = require('./lib/system');
 const { Ollama } = require('./lib/ollama');
 const ollama = new Ollama({ onProgress: (name, st) => broadcast({ type: 'ollamaPull', name, pull: st }) });
 const llmDeps = () => ({ providers, anthropicKey: setup.secrets.get('anthropicApiKey'), ollamaBase: ollama.base });
@@ -110,12 +111,15 @@ function nvidiaGpu() {
   return _gpu;
 }
 nvidiaGpu();
+// local date-time with offset, e.g. 2026-11-15T08:02:46+03:30 (models turn "tomorrow 10am" into a date with it)
+function localIso(d = new Date()) { const o = -d.getTimezoneOffset(), p = n => String(Math.floor(Math.abs(n))).padStart(2, '0'); return new Date(d.getTime() + o * 60000).toISOString().slice(0, 19) + (o >= 0 ? '+' : '-') + p(o / 60) + ':' + p(o % 60); }
 const voiceContext = () => {
   const chats = [...store.chats.values()];
   const proj = id => (store.project(id) || {}).name || '?';
   const lastReport = c => { const m = [...c.messages].reverse().find(x => x.kind === 'report'); return m ? `${m.report.rounds || 0} rounds, ${(m.report.files || []).length} files changed${m.report.openBugs ? ', ' + m.report.openBugs + ' open bugs' : ''}` : ''; };
   return {
-    now: new Date().toString(),
+    now: new Date().toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' }),
+    nowIso: localIso(),
     projects: store.projects().map(p => ({ id: p.id, name: p.name })),
     running: [...orch.running.keys()].map(id => store.chat(id)).filter(Boolean).map(c => ({ id: c.id, title: c.title, project: proj(c.projectId), status: c.status })),
     recent: chats.filter(c => !orch.running.has(c.id) && c.messages.length && ['done', 'error', 'needs-attention', 'unverified', 'stopped', 'budget'].includes(c.status))
@@ -148,7 +152,7 @@ async function voiceAct(a) {
     for (const c of target) orch.stop(c.id);
     return { ok: true, stopped: target.length };
   }
-  if (a.type === 'add_task') { const t = tasks.add({ title: p.title, due: p.due || null, priority: p.priority }, 'voice'); return { ok: true, task: t }; }
+  if (a.type === 'add_task') { const d = p.due ? Date.parse(p.due) : NaN; const t = tasks.add({ title: p.title, due: Number.isFinite(d) ? new Date(d).toISOString() : null, priority: p.priority }, 'voice'); return { ok: true, task: t }; }
   if (a.type === 'complete_task') { const t = tasks.get(String(p.id || '')); if (!t) return { ok: false, error: 'تسک پیدا نشد' }; tasks.update(t.id, { done: true }); return { ok: true, task: t }; }
   if (a.type === 'open') return { ok: true, open: { section: String(p.section || 'home'), chat: p.chat ? (findByName([...store.chats.values()], p.chat, 'title') || {}).id || null : null } };
   return null;
@@ -550,6 +554,36 @@ async function api(req, res, url) {
       if (parts[1] && m === 'DELETE') { tasks.remove(parts[1]); return send(res, 200, { ok: true }); }
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
+  // ---- Command Center: real system, network, weather, agents, models and tasks ----
+  if (parts[0] === 'cc') {
+    try {
+      const s = store.settings();
+      if (!parts[1] && m === 'GET') {
+        let place = null; try { place = s.ccPlace ? JSON.parse(s.ccPlace) : null; } catch {}
+        const [online, ms] = await Promise.all([net.online(), system.latency()]);
+        const [weather, ol, claudeOk] = await Promise.all([online || place ? system.weather(place) : null, ollama.status(), claudeReady()]);
+        const running = [...orch.running.keys()].map(id => store.chat(id)).filter(Boolean)
+          .map(c => ({ id: c.id, title: c.title, status: c.status, project: (store.project(c.projectId) || {}).name || '', since: c.updatedAt || 0 }));
+        return send(res, 200, {
+          system: system.snapshot(),
+          net: { online: ms != null ? true : online, latency: ms },
+          weather, place,
+          agents: { running, state: orch.agentState },
+          llms: [
+            { id: 'claude', name: 'Claude', ok: !!claudeOk, note: claudeOk ? 'وصل' : 'وصل نیست' },
+            { id: 'codex', name: 'Codex', ok: !!agents.CLIS.codex, note: agents.CLIS.codex ? 'نصب است' : 'نصب نیست' },
+            ...providers.view().map(p => ({ id: p.id, name: p.name, ok: !!p.hasKey, note: p.hasKey ? 'کلید دارد' : 'بدون کلید' })),
+            { id: 'ollama', name: 'Ollama (آفلاین)', ok: ol.running && ol.models.length > 0, note: !ol.installed ? 'نصب نیست' : !ol.running ? 'اجرا نشده' : ol.models.length.toLocaleString('fa-IR') + ' مدل' },
+          ],
+          tasks: tasks.today().slice(0, 12),
+          queue: taskQueue.all().filter(j => j.status === 'pending' || j.status === 'running').length,
+          voice: { enabled: !!s.voiceEnabled, mode: s.voiceMode || 'auto' },
+          clocks: s.ccClocks,
+        });
+      }
+      if (parts[1] === 'geocode' && m === 'POST') return send(res, 200, await system.geocode(body.q));
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
   if (parts[0] === 'voice') {
     try {
       const s = store.settings();
@@ -603,6 +637,7 @@ async function api(req, res, url) {
       // offline brain (Ollama): start it, download a model (only on the user's click)
       if (parts[1] === 'ollama' && parts[2] === 'start' && m === 'POST') { await ollama.ensureRunning(); return send(res, 200, await ollama.status()); }
       if (parts[1] === 'ollama' && parts[2] === 'pull' && m === 'POST') return send(res, 200, ollama.pull(String(body.name || '')));
+      if (parts[1] === 'warm' && m === 'POST') { const off = s.voiceModelOffline; if (off && s.voiceMode !== 'online') ollama.warm(off).catch(() => {}); return send(res, 200, { ok: true }); }
       if (parts[1] === 'net' && m === 'GET') return send(res, 200, { online: await net.online({ force: true }) });
     } catch (e) { return send(res, 400, { error: e.message }); }
   }

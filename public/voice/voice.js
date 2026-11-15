@@ -173,7 +173,7 @@ function doResult(res) {
 }
 function openSection(o) {
   const go = {
-    home: () => window.goHome && window.goHome(), settings: () => window.settingsDialog && window.settingsDialog('global'),
+    home: () => (window.showSection ? window.showSection('cc') : window.goHome && window.goHome()), settings: () => window.settingsDialog && window.settingsDialog('global'),
     connectors: () => window.extDialog && window.extDialog('connectors'), plugins: () => window.extDialog && window.extDialog('plugins'),
     queue: () => window.queueDialog && window.queueDialog(), ops: () => window.openOps && window.openOps(), voice: () => voiceDialog(),
     chat: () => o.chat && window.openChat && window.openChat(o.chat),
@@ -301,6 +301,7 @@ async function start(talkNow) {
     const st = await api('/voice/status');
     V.localStt = st.stt.local; V.gpu = st.stt.gpu;
     setNet(st.online, false);
+    api('/voice/warm', { body: {} }).catch(() => {}); // load the offline model in the background
     if (settings().voiceWake !== false && st.assets.wakeword.installed) await loadWakeWord();
     setState('idle', V.wwError ? 'تشخیص «هی جارویس» بار نشد: ' + V.wwError : !st.assets.wakeword.installed && settings().voiceWake !== false ? 'برای «هی جارویس» مدلش را از تنظیمات صدا دانلود کنید. فعلاً Ctrl+Space.' : '');
     if (talkNow) startRecording(false);
@@ -380,7 +381,7 @@ async function voiceDialog() {
       voiceApiVoice: $('#vApiVoice').value, voiceLang: $('#vLang').value, voiceWake: $('#vWake').checked, voiceWakeThreshold: +$('#vThr').value, voiceSpeak: $('#vSpeak').checked };
     const micChanged = body.voiceMicId !== (settings().voiceMicId || '');
     if (body.voiceMode === 'offline' && !body.voiceModelOffline) { window.toast('برای حالت آفلاین، یک «مغز آفلاین» انتخاب کنید (اول یکی از مدل‌ها را دانلود کنید).', true); return; }
-    try { S.settings = await api('/settings', { body }); setNet(body.voiceMode === 'offline' ? false : undefined); if (close) { $('#dlg').close(); window.toast('ذخیره شد'); } } catch (err) { window.toast(err.message, true); return; }
+    try { S.settings = await api('/settings', { body }); if (body.voiceModelOffline) api('/voice/warm', { body: {} }).catch(() => {}); setNet(body.voiceMode === 'offline' ? false : undefined); if (close) { $('#dlg').close(); window.toast('ذخیره شد'); } } catch (err) { window.toast(err.message, true); return; }
     if (micChanged && V.stream) { stopMic(); await startMic().catch(() => {}); }
     if (body.voiceWake && V.state !== 'off') { const st2 = await api('/voice/status'); V.localStt = st2.stt.local; if (st2.assets.wakeword.installed) await loadWakeWord(); }
   }
@@ -409,6 +410,7 @@ window.addEventListener('jarvis:ev', e => {
 
 // ---------- entry points ----------
 window.voiceDialog = voiceDialog;
+window.voiceOpen = openSection;
 window.voiceStart = start;
 const btn = document.getElementById('btnVoice');
 if (btn) btn.onclick = () => (V.state === 'off' ? start(false) : voiceDialog());
