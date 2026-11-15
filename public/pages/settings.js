@@ -137,6 +137,7 @@ async function flush() {
       if (r.token) { localStorage.setItem('jarvis.token', r.token); delete r.token; window.toast('توکن دسترسی فعال شد و در این مرورگر ذخیره شد'); window.connectEvents && window.connectEvents(); }
       S.settings = r;
       if (window.jarvisDesktop && window.jarvisDesktop.applySettings && Object.keys(vals).some(k => /^desktop/.test(k))) window.jarvisDesktop.applySettings();
+      if ('sellerMode' in vals && window.rebuildRail) window.rebuildRail();
     }
     if (vals.notify && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission();
     try { window.renderQuick && window.renderQuick(); window.renderAgents && window.renderAgents(); window.renderModelBar && window.renderModelBar(); } catch {}

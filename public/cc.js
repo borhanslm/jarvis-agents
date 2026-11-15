@@ -27,7 +27,7 @@ const SECTIONS = [
 const VIEWS = window.JARVIS_VIEWS || (window.JARVIS_VIEWS = {});
 window.registerView = (id, def) => { VIEWS[id] = def; };
 function buildRail() {
-  const extra = Object.entries(VIEWS).map(([id, v]) => ({ id, icon: v.icon, label: v.label, end: !!v.end, go: () => show(id) }));
+  const extra = Object.entries(VIEWS).filter(([, v]) => !v.when || v.when()).map(([id, v]) => ({ id, icon: v.icon, label: v.label, end: !!v.end, go: () => show(id) }));
   SECTIONS.splice(2, 0, ...extra.filter(x => !x.end));
   SECTIONS.push(...extra.filter(x => x.end)); // e.g. settings: last in the rail
   const layout = $('.layout');
@@ -42,6 +42,7 @@ function buildRail() {
   view.id = 'ccView'; view.className = 'cc-view page-view'; view.setAttribute('aria-label', 'مرکز فرمان');
   layout.append(view);
   for (const [id, v] of Object.entries(VIEWS)) {
+    if (document.getElementById('view-' + id)) continue;
     const el = document.createElement('section');
     el.id = 'view-' + id; el.className = 'page-view ' + (v.className || ''); el.setAttribute('aria-label', v.label);
     layout.append(el); v.el = el;
@@ -63,6 +64,17 @@ function show(id) {
   else { stopTimers(); core && core.pause(); }
 }
 window.showSection = show;
+// rebuild the rail (e.g. seller mode switched on or off)
+window.rebuildRail = () => {
+  const old = $('#rail'); if (!old) return;
+  const base = SECTIONS.filter(s => !VIEWS[s.id]);
+  SECTIONS.length = 0; SECTIONS.push(...base);
+  const extra = Object.entries(VIEWS).filter(([, v]) => !v.when || v.when()).map(([id, v]) => ({ id, icon: v.icon, label: v.label, end: !!v.end, go: () => show(id) }));
+  SECTIONS.splice(2, 0, ...extra.filter(x => !x.end)); SECTIONS.push(...extra.filter(x => x.end));
+  old.innerHTML = SECTIONS.map(s => `<button type="button" class="rail-btn ${s.id === current ? 'on' : ''}" data-sec="${s.id}" title="${esc(s.label)}" aria-label="${esc(s.label)}">${ic(s.icon)}<span>${esc(s.label)}</span></button>`).join('');
+  for (const [id, v] of Object.entries(VIEWS)) if (!document.getElementById('view-' + id)) { const el = document.createElement('section'); el.id = 'view-' + id; el.className = 'page-view ' + (v.className || ''); el.setAttribute('aria-label', v.label); $('.layout').append(el); v.el = el; }
+  if (VIEWS[current] && VIEWS[current].when && !VIEWS[current].when()) show('cc');
+};
 
 // ---------- the page ----------
 function renderShell() {
@@ -272,6 +284,8 @@ function boot() {
   show(v);
   // opening a chat / project from anywhere switches to the code view
   document.addEventListener('click', e => { if (current !== 'code' && e.target.closest('#chatList li, #projectList li, #btnNewChat')) show('code'); }, true);
+  // conditional sections (seller mode) need the settings, which arrive a moment later
+  const waitState = (n = 0) => ((window.JARVIS_STATE || {}).settings ? window.rebuildRail() : n < 60 && setTimeout(() => waitState(n + 1), 250)); waitState();
   const brand = $('#brand'); if (brand) brand.addEventListener('click', () => show('cc'));
 }
 // after every module script ran (so their sections are registered)

@@ -206,6 +206,17 @@ async function n8nWorkflows() {
 }
 setInterval(() => { try { workflows.tick(); } catch (e) { console.error('workflows', e.message); } }, 30000).unref();
 const agentKit = require('./lib/agent-kit');
+// ---- selling the Android app: signing keys and the sales log (seller mode only) ----
+const license = require('./lib/license');
+const SALES_FILE = path.join(DATA, 'sales.json');
+const readSales = () => { try { const v = JSON.parse(fs.readFileSync(SALES_FILE, 'utf8')); return Array.isArray(v) ? v : []; } catch { return []; } };
+const writeSales = list => { fs.writeFileSync(SALES_FILE + '.tmp', JSON.stringify(list, null, 1)); fs.renameSync(SALES_FILE + '.tmp', SALES_FILE); };
+function sellerView() {
+  const s = store.settings(), sales = readSales();
+  const year = Date.now() - 365 * 864e5;
+  return { hasKeys: !!(s.sellerPublicKey && setup.secrets.get('sellerPrivateKey')), publicKey: s.sellerPublicKey || '', sales: sales.slice().reverse(),
+    totals: { count: sales.length, year: sales.filter(x => x.issuedAt > year).length, amount: sales.reduce((t, x) => t + (+x.amount || 0), 0) } };
+}
 const { Talks } = require('./lib/talks');
 const talks = new Talks(DATA, { chat: chatLLM, onEvent: ev => broadcast(ev) });
 // No internet + an online model chosen: answer with the offline model (mode "auto" only)
@@ -803,6 +814,43 @@ async function api(req, res, url) {
       }
       if (parts[2] === 'stop' && m === 'POST') { talks.stop(id); return send(res, 200, { ok: true }); }
       if (parts[2] === 'export' && m === 'GET') { res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(talks.markdown(id)); }
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
+  if (parts[0] === 'seller') {
+    try {
+      const s = store.settings();
+      if (!parts[1] && m === 'GET') return send(res, 200, sellerView());
+      if (parts[1] === 'keys' && m === 'POST') {
+        if (s.sellerPublicKey && setup.secrets.get('sellerPrivateKey') && !body.force) throw new Error('کلید از قبل ساخته شده است. ساخت دوباره، همه‌ی لایسنس‌های قبلی را بی‌اعتبار می‌کند.');
+        const k = license.generateKeys();
+        setup.secrets.set('sellerPrivateKey', k.privateKey);
+        store.updateSettings({ sellerPublicKey: k.publicKey });
+        return send(res, 200, sellerView());
+      }
+      if (parts[1] === 'backup' && m === 'GET') {
+        const priv = setup.secrets.get('sellerPrivateKey');
+        if (!priv) throw new Error('کلیدی ساخته نشده');
+        return send(res, 200, { kind: 'jarvis-seller-keys', v: 1, publicKey: s.sellerPublicKey, privateKey: priv, createdOn: new Date().toISOString() });
+      }
+      if (parts[1] === 'restore' && m === 'POST') {
+        const pub = String(body.publicKey || ''), priv = String(body.privateKey || '');
+        const t = license.issue({ privateKey: priv, device: 'AAAA-AAAA-AAAA' });
+        if (!license.verify(t.key, pub, 'AAAA-AAAA-AAAA').ok) throw new Error('این دو کلید با هم جور نیستند');
+        setup.secrets.set('sellerPrivateKey', priv); store.updateSettings({ sellerPublicKey: pub });
+        return send(res, 200, sellerView());
+      }
+      if (parts[1] === 'issue' && m === 'POST') {
+        const r = license.issue({ privateKey: setup.secrets.get('sellerPrivateKey'), device: body.device, buyer: body.buyer, updateMonths: body.updateMonths });
+        const sales = readSales();
+        const contact = String(body.contact || '').trim().slice(0, 80);
+        const before = contact ? sales.filter(x => x.contact === contact && x.issuedAt > Date.now() - 365 * 864e5) : [];
+        const sale = { id: r.payload.id, device: r.payload.d, buyer: r.payload.b, contact, amount: Math.max(0, +body.amount || 0), note: String(body.note || '').slice(0, 300),
+          kind: body.kind === 'transfer' ? 'transfer' : 'sale', issuedAt: Date.now(), updatesUntil: r.payload.u * 864e5, key: r.key };
+        sales.push(sale); writeSales(sales);
+        return send(res, 200, { ...sale, previousForContact: before.length });
+      }
+      if (parts[1] === 'verify' && m === 'POST') { const v = license.verify(body.key, s.sellerPublicKey, body.device || null); return send(res, 200, { ...v, message: v.ok ? 'معتبر است' : license.REASON_FA[v.reason] }); }
+      if (parts[1] === 'sales' && parts[2] && m === 'DELETE') { writeSales(readSales().filter(x => x.id !== parts[2])); return send(res, 200, sellerView()); }
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
   // ---- workflows ----
