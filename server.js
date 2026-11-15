@@ -213,6 +213,9 @@ const agentKit = require('./lib/agent-kit');
 const clubLib = require('./lib/club');
 const club = new clubLib.Club({ dataDir: DATA, secrets: setup.secrets, settings: () => store.settings(), defaultUrl: ((require('./package.json').jarvis || {}).clubUrl) || '' });
 const clubView = () => ({ ...club.state(), deploy: clubDeploy, cfLogin: clubLogin });
+// admin-only things (selling, license keys, club setup): with a club only its admins; without one, the local owner
+const clubAdmin = () => { const st = club.state(); return !st.required || !!(st.loggedIn && st.user && st.user.role === 'admin'); };
+const ADMIN_ONLY = 'این بخش فقط برای مدیر است';
 const clubBroadcast = () => broadcast({ type: 'club', club: clubView() });
 setTimeout(() => club.refresh().then(clubBroadcast).catch(() => {}), 3000).unref();
 setInterval(() => club.refresh().then(clubBroadcast).catch(() => {}), 6 * 36e5).unref();
@@ -884,6 +887,7 @@ async function api(req, res, url) {
       if (parts[1] === 'register' && m === 'POST') { const st = await club.register(body); clubBroadcast(); return send(res, 200, st); }
       if (parts[1] === 'logout' && m === 'POST') { const st = await club.logout(); clubBroadcast(); return send(res, 200, st); }
       if (parts[1] === 'refresh' && m === 'POST') { const st = await club.refresh(); clubBroadcast(); return send(res, 200, st); }
+      if (['address', 'cf-login', 'cf-open', 'deploy'].includes(parts[1]) && !clubAdmin()) return send(res, 403, { error: ADMIN_ONLY });
       if (parts[1] === 'address' && m === 'POST') {
         const u = String(body.url || '').trim().replace(/\/+$/, '');
         if (u && !/^https:\/\/[\w.-]+(:\d+)?$/.test(u)) throw new Error('آدرس باید مثل https://jarvis-club.example.workers.dev باشد');
@@ -919,6 +923,7 @@ async function api(req, res, url) {
     } catch (e) { const st = e.status === 401 ? 400 : e.status && e.status < 600 ? e.status : 400; if (e.status === 401) clubBroadcast(); return send(res, st, { error: e.message, offline: !!e.offline, relogin: e.status === 401 }); }
   }
   if (parts[0] === 'seller') {
+    if (!clubAdmin()) return send(res, 403, { error: ADMIN_ONLY });
     try {
       const s = store.settings();
       if (!parts[1] && m === 'GET') return send(res, 200, sellerView());

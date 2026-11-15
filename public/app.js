@@ -533,7 +533,10 @@ async function discoverDialog() {
 // ---------- settings (data-driven; global or per project) ----------
 const MODEL_HELP = 'یکی از مدل‌های Claude، یا «سفارشی…» برای هر شناسه‌ی دیگر؛ پیش‌فرض = مدل پیش‌فرض Claude CLI';
 const EFFORTS = [['', 'پیش‌فرض'], ['low', 'low — سریع و ارزان'], ['medium', 'medium'], ['high', 'high'], ['xhigh', 'xhigh'], ['max', 'max — کند و گران']];
-const SETTINGS_SCHEMA = [
+// Admin-only parts (selling, license keys, club setup): with a club, only its admins see them;
+// without a club (the owner's own computer, before setup) the local user is the admin.
+window.clubAdmin = () => { const c = window.JARVIS_CLUB; if (!c) return false; if (!c.required) return true; return !!(c.loggedIn && c.user && c.user.role === 'admin'); };
+const SETTINGS_SCHEMA_ALL = [
   { title: 'سرعت و هزینه', icon: 'gauge', fields: [
     { k: 'leanMode', t: 'bool', l: 'حالت سبک: بدون MCP، اسکیل‌ها و هوک‌های کاربر؛ فقط ابزارهای لازم هر نقش', h: 'در تست‌ها هزینه‌ی هر فراخوانی را نصف و سرعت را دو برابر کرد. اگر Claude به یک سرور MCP نیاز دارد خاموشش کنید.' },
     { k: 'maxRunCostUsd', t: 'number', step: 0.5, l: 'سقف هزینه‌ی Claude برای هر اجرا (دلار، ۰ = بدون سقف)', h: 'وقتی پر شود کار متوقف می‌شود. با اشتراک Pro/Max این سقف خاموش است، چون پولی پرداخت نمی‌شود (گزینه‌ی بعدی).' },
@@ -614,7 +617,7 @@ const SETTINGS_SCHEMA = [
     { k: 'desktopAutoUpdate', t: 'bool', global: 1, l: 'به‌روزرسانی خودکار از GitHub', h: 'نسخه‌ی تازه در پس‌زمینه دانلود می‌شود و با یک کلیک (یا با بستن کامل برنامه) نصب می‌شود.' },
     { k: 'desktopHotkey', t: 'bool', global: 1, l: 'میانبر سراسری Ctrl+Shift+J برای نمایش یا پنهان کردن جارویس' },
   ] },
-  { title: 'فروش', icon: 'wallet', fields: [
+  { title: 'فروش', icon: 'wallet', admin: true, fields: [
     { k: 'sellerMode', t: 'bool', global: 1, l: 'حالت فروشنده: بخش «فروش اپ اندروید» نشان داده شود', h: 'برای سازنده‌ی جارویس: ساخت کلید لایسنس برای خریدارهای اپ اندروید و فهرست فروش‌ها. کاربرهای عادی لازمش ندارند.' },
   ] },
   { title: 'اعلان‌ها', icon: 'bell', fields: [
@@ -622,6 +625,9 @@ const SETTINGS_SCHEMA = [
     { k: 'speak', t: 'bool', l: 'اعلام صوتی پایان کار' },
   ] },
 ];
+// the groups this person may see (admin-only groups hidden for members)
+const SETTINGS_VISIBLE = () => SETTINGS_SCHEMA_ALL.filter(g => !g.admin || window.clubAdmin());
+Object.defineProperty(window, 'SETTINGS_SCHEMA', { get: SETTINGS_VISIBLE, configurable: true });
 
 function fieldHtml(f, v, isProject) {
   const dis = isProject && f.global ? 'disabled title="این تنظیم فقط سراسری است"' : !isProject && f.projectOnly ? 'disabled title="این تنظیم فقط در «تنظیمات پروژه» است"' : '';
@@ -639,7 +645,7 @@ function fieldHtml(f, v, isProject) {
 
 function readSettingsForm() {
   const out = {};
-  for (const sec of SETTINGS_SCHEMA) for (const f of sec.fields) {
+  for (const sec of SETTINGS_VISIBLE()) for (const f of sec.fields) {
     const el = document.querySelector(`#dlgBody [data-k="${f.k}"]`);
     if (!el || el.disabled) continue;
     if (f.t === 'bool') out[f.k] = el.checked;
@@ -667,8 +673,8 @@ async function settingsDialog(scope) {
       ${proj ? `<label><input type="radio" name="scope" value="project" ${isProject ? 'checked' : ''}><span>${ic('folder')}فقط پروژه‌ی «${esc(proj.name)}»</span></label>` : ''}
     </div>
     ${isProject ? `<div class="help scope-help">${override ? 'این پروژه تنظیمات اختصاصی دارد.' : 'این پروژه از تنظیمات سراسری پیروی می‌کند؛ با ذخیره، تنظیمات اختصاصی برایش ساخته می‌شود.'}</div>` : ''}
-    <div class="settings-tabs">${SETTINGS_SCHEMA.map((s, i) => `<button type="button" class="stab ${i === 0 ? 'on' : ''}" data-tab="${i}">${s.icon ? ic(s.icon) : ''}${s.title}</button>`).join('')}</div>
-    ${SETTINGS_SCHEMA.map((s, i) => `<section class="spane" data-pane="${i}" ${i ? 'hidden' : ''}>${s.fields.map(f => fieldHtml(f, values[f.k], isProject)).join('')}</section>`).join('')}
+    <div class="settings-tabs">${SETTINGS_VISIBLE().map((s, i) => `<button type="button" class="stab ${i === 0 ? 'on' : ''}" data-tab="${i}">${s.icon ? ic(s.icon) : ''}${s.title}</button>`).join('')}</div>
+    ${SETTINGS_VISIBLE().map((s, i) => `<section class="spane" data-pane="${i}" ${i ? 'hidden' : ''}>${s.fields.map(f => fieldHtml(f, values[f.k], isProject)).join('')}</section>`).join('')}
     ${!isProject && S.settings.requireToken && localStorage.getItem('jarvis.token') ? `<div class="help">${ic('key-round', 'sm')} لینک ورود با توکن: <code dir="ltr">${esc(location.origin)}/?token=${esc(localStorage.getItem('jarvis.token'))}</code></div>` : ''}
     <div class="dlg-actions">
       <button class="btn primary" id="sSave">ذخیره${isProject ? ' برای این پروژه' : ''}</button>

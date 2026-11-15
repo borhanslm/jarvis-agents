@@ -156,4 +156,4 @@ function wire() {
 }
 
 window.registerView = window.registerView || ((id, def) => { (window.JARVIS_VIEWS = window.JARVIS_VIEWS || {})[id] = def; });
-window.registerView('seller', { icon: 'wallet', label: 'فروش اپ اندروید', end: true, when: () => !!((window.JARVIS_STATE || {}).settings || {}).sellerMode, enter, leave() {} });
+window.registerView('seller', { icon: 'wallet', label: 'فروش اپ اندروید', end: true, when: () => !!((window.JARVIS_STATE || {}).settings || {}).sellerMode && !!(window.clubAdmin && window.clubAdmin()), enter, leave() {} });

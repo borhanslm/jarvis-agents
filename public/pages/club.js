@@ -18,6 +18,7 @@ async function loadState() {
   try { C.st = await api('/club'); } catch { return; }
   window.JARVIS_CLUB = C.st;
   gate();
+  if (window.rebuildRail) window.rebuildRail();
 }
 function gate() {
   const need = C.st && C.st.required && !C.st.loggedIn;
@@ -62,7 +63,7 @@ function gate() {
 }
 window.addEventListener('jarvis:ev', e => {
   const ev = e.detail; if (!ev || ev.type !== 'club') return;
-  C.st = { ...ev.club, deploy: ev.club.deploy !== undefined ? ev.club.deploy : C.st && C.st.deploy }; window.JARVIS_CLUB = C.st; gate();
+  C.st = { ...ev.club, deploy: ev.club.deploy !== undefined ? ev.club.deploy : C.st && C.st.deploy }; window.JARVIS_CLUB = C.st; gate(); if (window.rebuildRail) window.rebuildRail();
   if (C.el && C.el.classList.contains('on') && !C.busy) render();
 });
 

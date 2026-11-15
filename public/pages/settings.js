@@ -7,7 +7,7 @@ const ic = (n, c = '') => `<svg class="ic ${c}" aria-hidden="true"><use href="ic
 const faN = n => Number(n).toLocaleString('fa-IR');
 const api = (p, o) => window.api(p, o);
 const st = () => window.JARVIS_STATE || {};
-const schema = () => (typeof SETTINGS_SCHEMA !== 'undefined' ? SETTINGS_SCHEMA : []); // eslint-disable-line no-undef
+const schema = () => window.SETTINGS_SCHEMA || []; // admin-only groups are already left out
 
 // the switches people change most, as big tiles on the overview
 const QUICK = [
