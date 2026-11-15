@@ -142,7 +142,7 @@ test('Gemini speech: transcribe and speak through generateContent (mock server)'
     const sp = new Speech({ assets: { find: () => null, has: () => false }, apiTarget: () => ({ kind: 'gemini', key: 'AIza-test' }) });
     const r = await sp.transcribe(wavFromPcm(Buffer.alloc(32000), 16000), { engine: 'api', lang: 'fa' });
     assert.strictEqual(r.text, 'سلام جارویس'); assert.strictEqual(r.engine, 'api');
-    assert.match(calls[0].url, /models\/gemini-2\.5-flash:generateContent$/); assert.strictEqual(calls[0].key, 'AIza-test');
+    assert.match(calls[0].url, /models\/gemini-3\.8-flash:generateContent$/); assert.strictEqual(calls[0].key, 'AIza-test');
     assert.strictEqual(calls[0].body.contents[0].parts[1].inline_data.mime_type, 'audio/wav');
     const s = await sp.speak('سلام', { engine: 'api', prefs: { geminiVoice: 'Puck' } });
     assert.strictEqual(s.wav.slice(0, 4).toString(), 'RIFF'); assert.strictEqual(s.wav.readUInt32LE(24), 24000); assert.strictEqual(s.wav.length, 44 + 4800);
