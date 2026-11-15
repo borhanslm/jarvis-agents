@@ -114,3 +114,18 @@ test('speech auto: free local first; never the paid API without a key', async ()
   await sp2.speak('سلام', { engine: 'auto' }); // a key exists and local is missing: API is fine
   assert.deepStrictEqual(calls, ['apitts']);
 });
+
+test('a refused Anthropic key falls back to the Claude Code sign-in', async () => {
+  const realFetch = global.fetch; let hits = 0;
+  global.fetch = async () => { hits++; return new Response(JSON.stringify({ error: { message: 'invalid x-api-key' } }), { status: 401 }); };
+  const agents = require('../lib/agents'); const real = agents.runClaude; let cli = 0;
+  try {
+    // resolveTarget picks the key; the 401 must lead to the CLI path (stubbed through the target kind)
+    const t = llm.resolveTarget('claude-haiku-5-5', { anthropicKey: 'sk-bad' });
+    assert.strictEqual(t.kind, 'anthropic');
+    await llm.chat({ spec: 'claude-haiku-5-5', deps: { anthropicKey: 'sk-bad' }, messages: [{ role: 'user', content: 'hi' }] }).catch(e => e);
+    assert.strictEqual(hits, 1);
+    // afterwards the bad key is not used again
+    assert.strictEqual(llm.resolveTarget('claude-haiku-5-5', { anthropicKey: 'sk-bad' }).kind, 'claude-cli');
+  } finally { global.fetch = realFetch; agents.runClaude = real; }
+});
