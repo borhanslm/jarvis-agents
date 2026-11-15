@@ -224,10 +224,32 @@ const license = require('./lib/license');
 const SALES_FILE = path.join(DATA, 'sales.json');
 const readSales = () => { try { const v = JSON.parse(fs.readFileSync(SALES_FILE, 'utf8')); return Array.isArray(v) ? v : []; } catch { return []; } };
 const writeSales = list => { fs.writeFileSync(SALES_FILE + '.tmp', JSON.stringify(list, null, 1)); fs.renameSync(SALES_FILE + '.tmp', SALES_FILE); };
+// Publish the signed license list (short codes -> keys, revoked ids; no names) to a public GitHub repo
+const ghRun = args => new Promise(resolve => require('child_process').execFile('gh', args, { windowsHide: true, timeout: 60000, maxBuffer: 4 << 20 }, (err, so, se) => resolve({ ok: !err, out: String(so || ''), err: String(se || (err && err.message) || '') })));
+async function publishLicenses() {
+  const s = store.settings(), repo = String(s.sellRepo || '').trim();
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error('نام مخزن GitHub را مثل username/jarvis-licenses وارد کنید');
+  if (!agents.which('gh').length) throw new Error('GitHub CLI (gh) نصب نیست');
+  const priv = setup.secrets.get('sellerPrivateKey'); if (!priv) throw new Error('کلید امضای فروش ساخته نشده');
+  const sales = readSales();
+  const list = license.signList(priv, { entries: sales.filter(x => x.codeHash && !x.revoked).map(x => ({ c: x.codeHash, k: x.key })), revoked: sales.filter(x => x.revoked).map(x => x.id) });
+  // the repo: create it (public) the first time
+  if (!(await ghRun(['repo', 'view', repo, '--json', 'name'])).ok) {
+    const c = await ghRun(['repo', 'create', repo, '--public', '--description', 'JARVIS app activation list (signed; contains no personal data)']);
+    if (!c.ok) throw new Error('ساخت مخزن نشد: ' + c.err.slice(0, 200));
+  }
+  const cur = await ghRun(['api', `repos/${repo}/contents/licenses.json`, '--jq', '.sha']);
+  const args = ['api', '-X', 'PUT', `repos/${repo}/contents/licenses.json`, '-f', 'message=update licenses', '-f', 'content=' + Buffer.from(JSON.stringify(list, null, 1)).toString('base64')];
+  if (cur.ok && cur.out.trim()) args.push('-f', 'sha=' + cur.out.trim());
+  const r = await ghRun(args);
+  if (!r.ok) throw new Error('انتشار در GitHub نشد: ' + r.err.slice(0, 200));
+  return { ok: true, count: list.entries.length, revoked: list.revoked.length, url: `https://raw.githubusercontent.com/${repo}/main/licenses.json` };
+}
 function sellerView() {
   const s = store.settings(), sales = readSales();
   const year = Date.now() - 365 * 864e5;
   return { hasKeys: !!(s.sellerPublicKey && setup.secrets.get('sellerPrivateKey')), publicKey: s.sellerPublicKey || '', sales: sales.slice().reverse(),
+    repo: s.sellRepo || '', listUrl: s.sellRepo ? `https://raw.githubusercontent.com/${s.sellRepo}/main/licenses.json` : '',
     totals: { count: sales.length, year: sales.filter(x => x.issuedAt > year).length, amount: sales.reduce((t, x) => t + (+x.amount || 0), 0) } };
 }
 const { Talks } = require('./lib/talks');
@@ -861,16 +883,25 @@ async function api(req, res, url) {
         return send(res, 200, sellerView());
       }
       if (parts[1] === 'issue' && m === 'POST') {
-        const r = license.issue({ privateKey: setup.secrets.get('sellerPrivateKey'), device: body.device, buyer: body.buyer, updateMonths: body.updateMonths });
+        const r = license.issue({ privateKey: setup.secrets.get('sellerPrivateKey'), device: body.device, buyer: '', updateMonths: body.updateMonths }); // names stay only in the local sales log
         const sales = readSales();
         const contact = String(body.contact || '').trim().slice(0, 80);
         const before = contact ? sales.filter(x => x.contact === contact && x.issuedAt > Date.now() - 365 * 864e5) : [];
-        const sale = { id: r.payload.id, device: r.payload.d, buyer: r.payload.b, contact, amount: Math.max(0, +body.amount || 0), note: String(body.note || '').slice(0, 300),
+        const code = license.shortCode();
+        const sale = { id: r.payload.id, code, codeHash: license.codeHash(code), device: r.payload.d, buyer: String(body.buyer || '').trim().slice(0, 40), contact, amount: Math.max(0, +body.amount || 0), note: String(body.note || '').slice(0, 300),
           kind: body.kind === 'transfer' ? 'transfer' : 'sale', issuedAt: Date.now(), updatesUntil: r.payload.u * 864e5, key: r.key };
         sales.push(sale); writeSales(sales);
-        return send(res, 200, { ...sale, previousForContact: before.length });
+        let published = null; if (s.sellRepo) { try { published = await publishLicenses(); } catch (e) { published = { ok: false, error: e.message }; } }
+        return send(res, 200, { ...sale, previousForContact: before.length, published });
       }
       if (parts[1] === 'verify' && m === 'POST') { const v = license.verify(body.key, s.sellerPublicKey, body.device || null); return send(res, 200, { ...v, message: v.ok ? 'معتبر است' : license.REASON_FA[v.reason] }); }
+      if (parts[1] === 'publish' && m === 'POST') { if (typeof body.repo === 'string') store.updateSettings({ sellRepo: body.repo.trim() }); return send(res, 200, { ...(await publishLicenses()), view: sellerView() }); }
+      if (parts[1] === 'revoke' && parts[2] && m === 'POST') {
+        const sales = readSales(); const x = sales.find(y => y.id === parts[2]); if (!x) throw new Error('پیدا نشد');
+        x.revoked = !body.undo; writeSales(sales);
+        let published = null; if (s.sellRepo) { try { published = await publishLicenses(); } catch (e) { published = { ok: false, error: e.message }; } }
+        return send(res, 200, { view: sellerView(), published });
+      }
       if (parts[1] === 'sales' && parts[2] && m === 'DELETE') { writeSales(readSales().filter(x => x.id !== parts[2])); return send(res, 200, sellerView()); }
     } catch (e) { return send(res, 400, { error: e.message }); }
   }

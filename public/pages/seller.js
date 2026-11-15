@@ -22,7 +22,16 @@ function buyerMessage(s) {
 کلید فعال‌سازی را همان‌جا برایتان می‌فرستم. هر کلید برای یک گوشی است و تا یک سال آپدیت رایگان دارد.${s.sellNote ? '\n' + s.sellNote : ''}`;
 }
 function keyMessage(r) {
-  return `کلید فعال‌سازی اپ جارویس شما:
+  const online = !!(P.d && P.d.repo) && r.code;
+  return online ? `کد فعال‌سازی اپ جارویس شما:
+${r.code}
+
+در اپ: صفحه‌ی فعال‌سازی ← این کد را وارد کنید (اینترنت لازم است). فقط روی همین گوشی (${r.device}) کار می‌کند و آپدیت‌ها تا ${fdate(r.updatesUntil)} رایگان است.
+
+اگر کد وصل نشد، این کلید کامل را بچسبانید (بدون اینترنت کار می‌کند):
+${r.key}
+
+ممنون از خریدتان!` : `کلید فعال‌سازی اپ جارویس شما:
 ${r.key}
 
 در اپ: فعال‌سازی ← چسباندن کلید. این کلید فقط روی همین گوشی (${r.device}) کار می‌کند و آپدیت‌ها تا ${fdate(r.updatesUntil)} رایگان است. ممنون از خریدتان!`;
@@ -70,6 +79,15 @@ function render() {
       </section>
 
       <section class="sl-card">
+        <h2>${ic('globe', 'sm')}فعال‌سازی آنلاین با کد کوتاه (GitHub)</h2>
+        <p class="help">فهرست امضاشده‌ی لایسنس‌ها در یک مخزن <b>عمومی</b> GitHub منتشر می‌شود (فقط هش کدها و کلیدهای بدون نام؛ هیچ اطلاعات خریداری در آن نیست). خریدار فقط یک کد کوتاه مثل <code dir="ltr">JRV-7K2M-Q9XD</code> وارد می‌کند، و شما می‌توانید هر لایسنس را از راه دور لغو کنید. کلید کامل آفلاین هم همیشه کار می‌کند.</p>
+        <div class="field"><label>مخزن GitHub</label><input id="slRepo" dir="ltr" value="${esc(d.repo)}" placeholder="username/jarvis-licenses"></div>
+        <button type="button" class="btn btn-sm btn-primary" id="slPublish" ${d.hasKeys ? '' : 'disabled'}>${ic('upload', 'sm')}${d.repo ? 'انتشار دوباره' : 'ساخت مخزن و انتشار'}</button>
+        ${d.listUrl ? `<div class="help mt">آدرس فهرست (داخل اپ قرار می‌گیرد): <code dir="ltr" class="sl-pub">${esc(d.listUrl)}</code></div>` : ''}
+        <div id="slPubOut" class="help"></div>
+      </section>
+
+      <section class="sl-card">
         <h2>${ic('shield', 'sm')}بررسی یک کلید</h2>
         <div class="field"><label>کلید</label><textarea id="slVKey" dir="ltr" rows="3" placeholder="JRV1.…"></textarea></div>
         <div class="field"><label>کد دستگاه (اختیاری)</label><input id="slVDev" dir="ltr" placeholder="ABCD-EF23-GH45"></div>
@@ -78,10 +96,10 @@ function render() {
     </div>
 
     <div class="tq-bar"><h2 class="pg-sub">فروش‌ها</h2><div class="chat-search">${ic('search', 'sm')}<input id="slSearch" type="search" dir="auto" placeholder="جستجو: نام، تماس، کد دستگاه…" value="${esc(P.q)}"></div></div>
-    ${sales.length ? `<div class="sl-table-wrap"><table class="sl-table"><thead><tr><th>تاریخ</th><th>خریدار</th><th>کد دستگاه</th><th>نوع</th><th>مبلغ</th><th>آپدیت تا</th><th></th></tr></thead><tbody>
-      ${sales.map(x => `<tr data-id="${esc(x.id)}"><td>${fdate(x.issuedAt)}</td><td><b dir="auto">${esc(x.buyer || '—')}</b><div class="help" dir="auto">${esc(x.contact || '')}</div></td><td><code dir="ltr">${esc(x.device)}</code></td>
+    ${sales.length ? `<div class="sl-table-wrap"><table class="sl-table"><thead><tr><th>تاریخ</th><th>خریدار</th><th>کد فعال‌سازی</th><th>کد دستگاه</th><th>نوع</th><th>مبلغ</th><th>آپدیت تا</th><th></th></tr></thead><tbody>
+      ${sales.map(x => `<tr data-id="${esc(x.id)}"><td>${fdate(x.issuedAt)}</td><td><b dir="auto">${esc(x.buyer || '—')}</b><div class="help" dir="auto">${esc(x.contact || '')}</div></td><td>${x.code ? `<code dir="ltr">${esc(x.code)}</code>` : '—'}${x.revoked ? ' <span class="chip hi ag-chip" style="color:var(--color-danger)">لغو شده</span>' : ''}</td><td><code dir="ltr">${esc(x.device)}</code></td>
         <td>${x.kind === 'transfer' ? '<span class="ag-chip">انتقال</span>' : 'خرید'}</td><td>${x.amount ? faN(x.amount) : '—'}</td><td>${fdate(x.updatesUntil)}</td>
-        <td class="sl-acts"><button type="button" class="cc-mini" data-copykey="${esc(x.id)}" title="کپی پیام کلید" aria-label="کپی">${ic('copy', 'sm')}</button><button type="button" class="cc-mini" data-delsale="${esc(x.id)}" title="حذف از فهرست" aria-label="حذف">${ic('trash-2', 'sm')}</button></td></tr>`).join('')}
+        <td class="sl-acts"><button type="button" class="cc-mini" data-revoke="${esc(x.id)}" data-undo="${x.revoked ? 1 : ''}" title="${x.revoked ? 'برگرداندن لایسنس' : 'لغو لایسنس (از راه دور)'}" aria-label="لغو">${ic(x.revoked ? 'rotate-ccw' : 'circle-x', 'sm')}</button><button type="button" class="cc-mini" data-copykey="${esc(x.id)}" title="کپی پیام کلید" aria-label="کپی">${ic('copy', 'sm')}</button><button type="button" class="cc-mini" data-delsale="${esc(x.id)}" title="حذف از فهرست" aria-label="حذف">${ic('trash-2', 'sm')}</button></td></tr>`).join('')}
     </tbody></table></div>` : `<div class="tk-empty">${ic('wallet')}<h3>هنوز فروشی ثبت نشده</h3></div>`}
   </div>`;
   wire();
@@ -111,7 +129,8 @@ function wire() {
       const res = await api('/seller/issue', { body: { device: $('#slDev').value, buyer: $('#slBuyer').value, contact: $('#slBuyerC').value, amount: +$('#slAmt').value || 0, note: $('#slNoteB').value, kind } });
       P.last = res;
       const warn = res.previousForContact ? `<div class="va-tip">${ic('triangle-alert', 'sm')} این خریدار در یک سال اخیر ${faN(res.previousForContact)} کلید دیگر هم گرفته است.</div>` : '';
-      $('#slOut').innerHTML = `<div class="sl-key">${warn}<div class="help">کلید ساخته شد و در فهرست فروش‌ها ثبت شد:</div><code dir="ltr">${esc(res.key)}</code>
+      const pub = res.published ? (res.published.ok ? `<div class="ok">${ic('circle-check', 'sm')} در GitHub منتشر شد؛ کد کوتاه کار می‌کند.</div>` : `<div class="bad">انتشار نشد: ${esc(res.published.error)} — فعلاً کلید کامل را بفرستید.</div>`) : '';
+      $('#slOut').innerHTML = `<div class="sl-key">${warn}${pub}<div class="help">کد کوتاه:</div><div class="ph-code" dir="ltr">${esc(res.code)}</div><div class="help">کلید کامل (آفلاین):</div><code dir="ltr">${esc(res.key)}</code>
         <pre class="sl-msg" dir="auto">${esc(keyMessage(res))}</pre><div class="row-gap"><button type="button" class="btn btn-sm btn-primary" id="slCopyMsg">${ic('copy', 'sm')}کپی پیام برای خریدار</button><button type="button" class="btn btn-sm" id="slCopyKey">${ic('copy', 'sm')}فقط کلید</button></div></div>`;
       $('#slCopyMsg').onclick = () => copy(keyMessage(res)); $('#slCopyKey').onclick = () => copy(res.key);
       P.d = await api('/seller'); const out = $('#slOut').innerHTML; render(); $('#slOut').innerHTML = out; $('#slCopyMsg').onclick = () => copy(keyMessage(res)); $('#slCopyKey').onclick = () => copy(res.key);
@@ -120,6 +139,17 @@ function wire() {
   on('#slVerify', async () => { try { const v = await api('/seller/verify', { body: { key: $('#slVKey').value, device: $('#slVDev').value.trim() || null } }); $('#slVOut').innerHTML = v.ok ? `<span class="ok">${ic('circle-check', 'sm')} معتبر — دستگاه <code dir="ltr">${esc(v.payload.d)}</code>، ${esc(v.payload.b || 'بدون نام')}، آپدیت تا ${fdate(v.payload.u * 864e5)}</span>` : `<span class="bad">${ic('circle-x', 'sm')} ${esc(v.message)}</span>`; } catch (e) { window.toast(e.message, true); } });
   const se = r.querySelector('#slSearch'); if (se) se.oninput = () => { P.q = se.value.trim().toLowerCase(); clearTimeout(P._t); P._t = setTimeout(() => { render(); const s2 = $('#slSearch'); s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); }, 200); };
   r.querySelectorAll('[data-copykey]').forEach(b => b.onclick = () => { const x = P.d.sales.find(y => y.id === b.dataset.copykey); if (x) copy(keyMessage(x)); });
+  on('#slPublish', async () => {
+    const b = $('#slPublish'); b.disabled = true; $('#slPubOut').textContent = 'در حال انتشار…';
+    try { const r2 = await api('/seller/publish', { body: { repo: $('#slRepo').value } }); P.d = r2.view; render(); $('#slPubOut').innerHTML = `<span class="ok">${ic('circle-check', 'sm')} منتشر شد: ${faN(r2.count)} لایسنس، ${faN(r2.revoked)} لغوشده</span>`; }
+    catch (e) { $('#slPubOut').innerHTML = `<span class="bad">${esc(e.message)}</span>`; b.disabled = false; }
+  });
+  r.querySelectorAll('[data-revoke]').forEach(b => b.onclick = async () => {
+    const undo = !!b.dataset.undo;
+    if (!undo && !confirm('این لایسنس لغو شود؟ اپ آن گوشی دفعه‌ی بعد که به اینترنت وصل شود غیرفعال می‌شود (اگر فهرست در GitHub منتشر شده باشد).')) return;
+    try { const r2 = await api('/seller/revoke/' + b.dataset.revoke, { body: { undo } }); P.d = r2.view; render(); if (r2.published && !r2.published.ok) window.toast('انتشار نشد: ' + r2.published.error, true); else window.toast(undo ? 'برگردانده شد' : 'لغو شد'); }
+    catch (e) { window.toast(e.message, true); }
+  });
   r.querySelectorAll('[data-delsale]').forEach(b => b.onclick = async () => { if (!confirm('این ردیف از فهرست حذف شود؟ (کلیدی که فرستاده‌اید همچنان کار می‌کند)')) return; P.d = await api('/seller/sales/' + b.dataset.delsale, { method: 'DELETE' }); render(); });
 }
 

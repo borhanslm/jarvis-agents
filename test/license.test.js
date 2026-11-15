@@ -43,3 +43,19 @@ test('the phone-side check (WebCrypto) accepts the same keys', async () => {
   assert.strictEqual((await verifyLicense(key.slice(0, -4) + 'AAAA', keys.publicKey, DEV)).reason, 'signature');
   assert.strictEqual((await verifyLicense('nonsense', keys.publicKey, DEV)).reason, 'format');
 });
+
+test('short code + signed list: phone finds its key, revocation is signed, tampering is caught', async () => {
+  const lv = await import(pathToFileURL(path.join(__dirname, '..', 'public', 'license-verify.js')).href);
+  const code = L.shortCode();
+  const { key, payload } = L.issue({ privateKey: keys.privateKey, device: DEV, buyer: '' });
+  assert.strictEqual(payload.b, '');
+  const list = L.signList(keys.privateKey, { entries: [{ c: L.codeHash(code), k: key }], revoked: ['dead1234'] });
+  assert.ok(!JSON.stringify(list).includes('Sara')); // no personal data
+  assert.strictEqual(await lv.verifyList(JSON.parse(JSON.stringify(list)), keys.publicKey), true);
+  assert.strictEqual(await lv.codeHash(code.toLowerCase().replace(/-/g, ' ')), L.codeHash(code)); // same hash on the phone
+  const entry = list.entries.find(e => e.c === L.codeHash(code));
+  assert.strictEqual((await lv.verifyLicense(entry.k, keys.publicKey, DEV)).ok, true);
+  assert.strictEqual(await lv.verifyList({ ...list, revoked: [] }, keys.publicKey), false); // cannot remove a revocation
+  assert.strictEqual(await lv.verifyList(list, L.generateKeys().publicKey), false);
+  assert.ok(lv.isShortCode(code) && !lv.isShortCode('JRV1.abc'));
+});
