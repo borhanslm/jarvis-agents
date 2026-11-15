@@ -2113,13 +2113,13 @@ function notifyBlock() {
   const on = !!(st.notifyPhone && st.notifyChatId);
   return `<div class="wz-item ${on ? 'ok' : ''}">
     <div class="wz-icon">${ic('bell')}</div>
-    <div class="wz-body"><h4>اعلان روی گوشی <small class="help">بله یا تلگرام</small></h4>
-      ${on ? `<span class="wz-state ok">${ic('circle-check', 'sm')}روشن · ${st.notifyPhone === 'bale' ? 'بله' : 'تلگرام'}</span>` : '<span class="help">وقتی کاری تمام شد، به گوشی‌تان پیام می‌دهد.</span>'}
+    <div class="wz-body"><h4>دستیار تلگرام / بله <small class="help">اعلان + گفتگو با جارویس از گوشی</small></h4>
+      ${on ? `<span class="wz-state ok">${ic('circle-check', 'sm')}روشن · ${st.notifyPhone === 'bale' ? 'بله' : 'تلگرام'}${st.botEnabled ? ' · دستیار دوطرفه' : ''}</span>` : '<span class="help">وقتی کاری تمام شد، به گوشی‌تان پیام می‌دهد.</span>'}
       <div class="row-gap"><button type="button" class="btn btn-secondary btn-sm" data-notify="1">${ic('bell')}${on ? 'تنظیم' : 'راه‌اندازی'}</button></div></div></div>`;
 }
 async function notifyDialog() {
-  let cur = {}; try { cur = await api('/notify'); } catch {}
-  dialog(`<div class="dlg-scroll"><h3>${ic('bell')}اعلان روی گوشی</h3>
+  let cur = {}, bt = {}; try { [cur, bt] = await Promise.all([api('/notify'), api('/bot')]); } catch {}
+  dialog(`<div class="dlg-scroll"><h3>${ic('bell')}دستیار تلگرام / بله</h3>
     <ol class="help nt-steps">
       <li>در بله یا تلگرام به <b dir="ltr">@BotFather</b> پیام بدهید، <code>/newbot</code> را بفرستید و یک ربات بسازید. توکنی که می‌دهد را کپی کنید.</li>
       <li>ربات تازه‌تان را باز کنید و یک پیام (مثلاً «سلام») برایش بفرستید.</li>
@@ -2131,9 +2131,16 @@ async function notifyDialog() {
       <div class="row-gap"><button type="button" class="btn small" id="ntDetect">${ic('search', 'sm')}پیدا کردن خودکار</button><button type="button" class="btn small" id="ntTest">${ic('send', 'sm')}پیام آزمایشی</button></div>
       <div id="ntOut" class="help" role="status"></div></div>
     <div class="field"><label for="ntWhen">کی خبر بدهد</label><select id="ntWhen"><option value="all">پایان هر کار</option><option value="problems">فقط وقتی مشکلی بود</option></select></div>
-    <p class="help">فقط وضعیت کار (تمام شد / خطا)، اسم گفتگو و مدت زمان فرستاده می‌شود؛ هیچ کدی فرستاده نمی‌شود.</p></div>
+    <p class="help">در اعلان‌ها فقط وضعیت کار (تمام شد / خطا)، اسم گفتگو و مدت زمان فرستاده می‌شود؛ هیچ کدی فرستاده نمی‌شود.</p>
+    <h4>${ic('messages-square', 'sm')} گفتگو با جارویس از گوشی</h4>
+    <label class="check"><input type="checkbox" id="ntBot" ${bt.enabled ? 'checked' : ''}> جارویس در همین ربات به پیام‌ها و پیام‌های صوتی شما جواب بدهد (تسک، شروع کار تیمی، وضعیت ایجنت‌ها، سؤال)</label>
+    <div class="field"><label for="ntVoice">جواب صوتی</label><select id="ntVoice"><option value="auto">وقتی پیام صوتی فرستادم</option><option value="always">همیشه</option><option value="never">هرگز — فقط متن</option></select></div>
+    <div class="help" id="ntBotSt">${bt.running ? (bt.connected ? `${ic('circle-check', 'sm')} وصل است${bt.botName ? ' به <b dir="ltr">@' + esc(bt.botName) + '</b>' : ''}` : 'در حال وصل شدن…' + (bt.lastError ? ' — ' + esc(bt.lastError) : '')) : 'خاموش'}</div>
+    ${bt.ffmpeg ? '' : `<div class="va-tip">${ic('download', 'sm')} برای پیام صوتی، «FFmpeg» را از تنظیمات صدا دانلود کنید. <button type="button" class="btn small" id="ntFf">باز کردن تنظیمات صدا</button></div>`}
+    <p class="help">${ic('lock', 'sm')} فقط به همین شناسه‌ی گفتگو (شما) جواب می‌دهد؛ پیام بقیه نادیده گرفته می‌شود. کارهایی که چیزی را تغییر می‌دهند، قبل از اجرا با دکمه‌ی «بله» تأیید می‌خواهند. هیچ چیز روی اینترنت باز نمی‌شود.</p></div>
     <div class="dlg-actions"><button type="button" class="btn primary" id="ntSave">${ic('save', 'sm')}ذخیره</button><button type="button" class="btn ghost" id="ntBack">بازگشت</button></div>`);
-  $('#ntCh').value = cur.channel || ''; $('#ntWhen').value = cur.when || 'all';
+  $('#ntCh').value = cur.channel || ''; $('#ntWhen').value = cur.when || 'all'; $('#ntVoice').value = bt.voiceReply || 'auto';
+  if ($('#ntFf')) $('#ntFf').onclick = () => window.voiceDialog && window.voiceDialog();
   const out = (h, bad) => { $('#ntOut').innerHTML = h; $('#ntOut').className = 'help ' + (bad ? 'pi-bad' : ''); };
   const f = () => ({ channel: $('#ntCh').value, token: $('#ntTok').value.trim(), chatId: $('#ntChat').value.trim(), when: $('#ntWhen').value });
   $('#ntDetect').onclick = async () => {
@@ -2147,7 +2154,13 @@ async function notifyDialog() {
     try { await api('/notify/test', { body: f() }); out('پیام فرستاده شد؛ گوشی‌تان را نگاه کنید.'); } catch (e) { out(esc(e.message), true); }
   };
   $('#ntSave').onclick = async () => {
-    try { await api('/notify', { body: f() }); S.settings = await api('/settings', { body: {} }); toast('ذخیره شد'); setupDialog(); } catch (e) { out(esc(e.message), true); }
+    try {
+      await api('/notify', { body: f() });
+      await api('/bot', { body: { enabled: $('#ntBot').checked, voiceReply: $('#ntVoice').value } });
+      S.settings = await api('/settings', { body: {} });
+      toast($('#ntBot').checked ? 'ذخیره شد — حالا در ربات به جارویس پیام بدهید' : 'ذخیره شد');
+      if (window.__ntReturn) { const r = window.__ntReturn; window.__ntReturn = null; $('#dlg').close(); r(); } else setupDialog();
+    } catch (e) { out(esc(e.message), true); }
   };
   $('#ntBack').onclick = () => setupDialog();
 }

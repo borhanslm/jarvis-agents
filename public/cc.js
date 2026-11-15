@@ -18,6 +18,7 @@ const SECTIONS = [
   // full-page sections from other modules (AI Core, Chat, …) are inserted here — see registerView
   { id: 'tasks', icon: 'list-checks', label: 'تسک‌ها', go: () => tasksDialog() },
   { id: 'voice', icon: 'mic', label: 'دستیار صوتی', go: () => window.voiceDialog && window.voiceDialog() },
+  { id: 'bot', icon: 'send', label: 'دستیار تلگرام / بله', go: () => { window.__ntReturn = () => {}; window.notifyDialog && window.notifyDialog(); } },
   { id: 'ops', icon: 'activity', label: 'اتاق عملیات', go: () => window.openOps && window.openOps() },
   { id: 'queue', icon: 'clock', label: 'صف کارها', go: () => window.queueDialog && window.queueDialog() },
   { id: 'ext', icon: 'puzzle', label: 'اتصال‌ها و پلاگین‌ها', go: () => window.extDialog && window.extDialog() },

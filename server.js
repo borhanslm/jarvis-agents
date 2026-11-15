@@ -148,6 +148,44 @@ const voiceContext = () => {
   };
 };
 const brain = new Brain({ chat: chatLLM, context: voiceContext });
+// ---- Telegram / Bale assistant (two-way) ----
+const { Media } = require('./lib/media');
+const media = new Media(voiceAssets);
+const { Bot } = require('./lib/bot');
+const botBrain = new Brain({ chat: chatLLM, context: () => ({ ...voiceContext(), channel: 'telegram' }) });
+const botLog = [];
+// the brain's model: online when possible, the offline model when the internet is down (like voice)
+async function brainAsk(b, text) {
+  const s = store.settings();
+  const on = await voiceOnline(s);
+  const off = offlineSpec(s);
+  let spec = on ? (s.voiceModel || 'claude-haiku-5-5') : off;
+  if (!spec) throw new Error('اینترنت در دسترس نیست و مدل آفلاین انتخاب نشده (هسته‌ی هوش مصنوعی ← مدل آفلاین).');
+  let r;
+  try { r = await b.handle(text, { spec }); }
+  catch (e) { if (!on || s.voiceMode === 'online' || !off || !net.isNetError(e)) throw e; net.markOffline(); spec = off; r = await b.handle(text, { spec }); }
+  r.brain = { spec, offline: spec === off };
+  return r;
+}
+const bot = new Bot({
+  config: () => { const s = store.settings(); return { enabled: !!s.botEnabled, channel: s.notifyPhone, token: setup.secrets.get('notifyToken'), chatId: s.notifyChatId, voiceReply: s.botVoiceReply || 'auto' }; },
+  call: (...x) => notify.call(...x), fileUrl: (...x) => notify.fileUrl(...x), media, // notify is defined further down
+  ask: async text => { const r = await brainAsk(botBrain, text); const result = r.confirm ? null : await voiceAct(r.action); return { ...r, result }; },
+  confirm: async yes => { const a = botBrain.confirm(yes); return { action: a, result: a ? await voiceAct(a) : null }; },
+  reset: () => botBrain.reset(),
+  status: async () => {
+    const run = [...orch.running.keys()].map(id => store.chat(id)).filter(Boolean);
+    const q = taskQueue.all().filter(j => j.status === 'pending').length;
+    return (run.length ? '🟢 در حال کار:\n' + run.map(c => '• ' + c.title + ' — ' + ((store.project(c.projectId) || {}).name || '')).join('\n') : '⚪ الان هیچ ایجنتی کار نمی‌کند.') + (q ? '\n\n⏳ ' + q + ' کار در صف.' : '') + '\n\n🌐 ' + ((await net.online()) ? 'آنلاین' : 'آفلاین');
+  },
+  tasks: async () => { const t = tasks.today(); return t.length ? '📋 تسک‌های امروز:\n' + t.map(x => '• ' + x.title + (x.due ? ' — ' + new Date(x.due).toLocaleString('fa-IR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '') + (x.priority === 'high' ? ' ❗' : '')).join('\n') : 'برای امروز تسکی نیست.'; },
+  stopAll: async () => { const ids = [...orch.running.keys()]; for (const id of ids) orch.stop(id); return ids.length; },
+  transcribe: async wav => { const s = store.settings(); return speech.transcribe(wav, { engine: s.voiceStt, offline: !(await voiceOnline(s)), lang: s.voiceLang }); },
+  speak: async text => { const s = store.settings(); return speech.speak(text, { engine: s.voiceTts, offline: !(await voiceOnline(s)), prefs: { faVoice: s.voiceFaVoice, apiVoice: s.voiceApiVoice } }); },
+  onLog: e => { botLog.push(e); if (botLog.length > 200) botLog.splice(0, botLog.length - 200); broadcast({ type: 'botLog', entry: e }); },
+});
+function syncBot() { const c = bot.d.config(); if (c.enabled && c.token && c.chatId && c.channel) { if (!bot.running) bot.start(); } else if (bot.running) bot.stop(); }
+setTimeout(syncBot, 1500);
 const voiceLog = [];
 const findByName = (list, name, key = 'name') => { const n = String(name || '').trim().toLowerCase(); if (!n) return null; return list.find(x => String(x[key]).toLowerCase() === n) || list.find(x => String(x[key]).toLowerCase().includes(n) || n.includes(String(x[key]).toLowerCase())) || null; };
 // Carry out the action the brain chose. Returns what happened (shown and spoken by the panel).
@@ -479,11 +517,23 @@ async function api(req, res, url) {
         if (body.clearToken) setup.secrets.set('notifyToken', null);
         const out = store.updateSettings({ notifyPhone: channel, notifyChatId: String(body.chatId || '').trim().slice(0, 40), notifyWhen: body.when === 'problems' ? 'problems' : 'all' });
         broadcast({ type: 'settings', settings: out });
+        bot.stop(); setTimeout(syncBot, 400);
         return send(res, 200, { ok: true });
       }
       const token = (typeof body?.token === 'string' && body.token.trim()) || setup.secrets.get('notifyToken');
-      if (parts[1] === 'detect' && m === 'POST') return send(res, 200, await notify.detect({ channel: body.channel, token }));
+      if (parts[1] === 'detect' && m === 'POST') { bot.stop(); try { return send(res, 200, await notify.detect({ channel: body.channel, token })); } finally { setTimeout(syncBot, 500); } }
       if (parts[1] === 'test' && m === 'POST') return send(res, 200, await notify.send({ channel: body.channel, token, chatId: body.chatId, text: '🤖 جارویس: پیام آزمایشی. از این به بعد پایان کارها اینجا خبر داده می‌شود.' }));
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
+  if (parts[0] === 'bot') {
+    try {
+      if (!parts[1] && m === 'GET') return send(res, 200, { ...bot.status(), enabled: !!store.settings().botEnabled, voiceReply: store.settings().botVoiceReply, ffmpeg: media.ready(), log: botLog.slice(-40) });
+      if (!parts[1] && m === 'POST') {
+        const out = store.updateSettings({ ...(body.enabled !== undefined ? { botEnabled: !!body.enabled } : {}), ...(['auto', 'always', 'never'].includes(body.voiceReply) ? { botVoiceReply: body.voiceReply } : {}) });
+        broadcast({ type: 'settings', settings: out });
+        bot.stop(); setTimeout(syncBot, 400);
+        return send(res, 200, { ok: true });
+      }
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
   if (parts[0] === 'backup' && m === 'GET') return send(res, 200, store.backup());
@@ -995,6 +1045,7 @@ function stopAll() {
   for (const id of [...previews.keys()]) stopPreview(id);
   speech.stop(); // the resident whisper server
   for (const id of [...talks.running.keys()]) talks.stop(id);
+  bot.stop();
   talks.flush();
   store.flush();
 }

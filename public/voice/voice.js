@@ -358,7 +358,7 @@ async function voiceDialog() {
     <h4>اجزای آفلاین</h4>
     <div class="help">برای فارسی خوب، «مدل گفتار دقیق» را بگیرید. «هی جارویس» فارسی هم با همین مدل محلی تشخیص داده می‌شود.</div>
     ${st.nvidia && !a['whisper-cuda'].installed ? `<div class="va-tip">${ic('zap', 'sm')} کارت گرافیک <b dir="ltr">${esc(st.nvidia)}</b> دارید: «موتور گفتار روی کارت گرافیک» را بگیرید تا تشخیص گفتار حدود ۲۰ برابر سریع‌تر شود (کمتر از نیم ثانیه).</div>` : ''}
-    <div class="va-list">${['wakeword', 'whisper-bin', ...(st.nvidia || a['whisper-cuda'].installed ? ['whisper-cuda'] : []), 'whisper-turbo', 'whisper-base', 'piper-bin', 'voice-fa-amir', 'voice-fa-gyro', 'voice-en-lessac'].map(id => row(id)).join('')}</div>
+    <div class="va-list">${['wakeword', 'whisper-bin', ...(st.nvidia || a['whisper-cuda'].installed ? ['whisper-cuda'] : []), 'whisper-turbo', 'whisper-base', 'piper-bin', 'voice-fa-amir', 'voice-fa-gyro', 'voice-en-lessac', 'ffmpeg'].map(id => row(id)).join('')}</div>
     <div class="help">وضعیت: گفتار به متن ${st.stt.local ? 'محلی آماده' : 'محلی ناقص'}${st.stt.api ? '، API آماده' : ''} · متن به گفتار ${st.tts.local ? 'محلی آماده' : 'محلی ناقص'}${st.tts.api ? '، API آماده' : ''}${!st.stt.api ? ' · برای API یک اتصال OpenAI با کلید در «اتصال‌ها» بسازید.' : ''}</div>
     <div class="row-gap"><button type="button" class="btn small" id="vTestTts">${ic('play', 'sm')}آزمایش صدا</button></div>
     <h4>گفتگوهای اخیر</h4><div class="v-log" id="vLog">${logHtml()}</div></div>
