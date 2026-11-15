@@ -1907,7 +1907,9 @@ function renderRoles() {
   if (sub) sub.textContent = 'تیم ایجنت‌های برنامه‌نویس';
   const p = homeEl('#homeRoles');
   if (S.subagents) renderSubagents();
-  if (p) p.textContent = `${b} کد را می‌نویسد، ${r} تحلیل و تست می‌کند و باگ‌ها را گزارش می‌دهد، و ${b} آن‌ها را رفع می‌کند — تا وقتی ${r} تأیید کند.`;
+  const ba = roleAgent('builder'), ra = roleAgent('reviewer');
+  const who = x => prettyModel(x.provider ? `p:${x.provider.id}:${x.model}` : x.model || (x.name === 'Codex' ? S.codexDefaultModel : '')) || x.name;
+  if (p) p.textContent = `سازنده (${who(ba)}) کد را می‌نویسد، تستر (${who(ra)}) تحلیل و تست می‌کند و باگ‌ها را گزارش می‌دهد، و سازنده آن‌ها را رفع می‌کند — تا وقتی تستر تأیید کند.`;
 }
 
 // ---------- connections (custom APIs: DeepSeek, Kimi, GLM, OpenAI, …) ----------
