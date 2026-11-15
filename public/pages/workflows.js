@@ -7,9 +7,11 @@ const ic = (n, c = '') => `<svg class="ic ${c}" aria-hidden="true"><use href="ic
 const faN = n => Number(n).toLocaleString('fa-IR');
 const api = (p, o) => window.api(p, o);
 
-const ICON = { start: 'play', llm: 'sparkles', agent: 'bot', ask: 'messages-square', approve: 'circle-check', condition: 'git-branch', task: 'list-checks', notify: 'send', http: 'globe', delay: 'clock', end: 'square' };
+const ICON = { webhook: 'plug', subflow: 'git-branch', start: 'play', llm: 'sparkles', agent: 'bot', ask: 'messages-square', approve: 'circle-check', condition: 'git-branch', task: 'list-checks', notify: 'send', http: 'globe', delay: 'clock', end: 'square' };
 const PORT_FA = { next: '', yes: 'بله', no: 'نه', fail: 'خطا' };
 const HELP = {
+  webhook: 'یک ورک‌فلو در n8n، Zapier، Make یا هر سرویس دیگر را با Webhook صدا می‌زند و جوابش را خروجی این قدم می‌کند. {{json_last}} = خروجی قدم قبل به‌صورت JSON.',
+  subflow: 'یکی دیگر از ورک‌فلوهای جارویس را اجرا می‌کند و تا تمام شدنش صبر می‌کند؛ خروجی آن، خروجی این قدم است.',
   llm: 'یک دستور به هوش مصنوعی. از {{last}} (خروجی قدم قبل)، {{input}} (ورودی اجرا)، {{n.شناسه}} و {{date}} استفاده کنید.',
   agent: 'کار برنامه‌نویسی را به تیم ایجنت‌ها می‌دهد و تا پایان صبر می‌کند. اگر شکست بخورد از خروجی «خطا» ادامه می‌دهد.',
   ask: 'از شما سؤال می‌پرسد (در پنل و تلگرام) و تا جواب ندهید صبر می‌کند. جواب شما خروجی این قدم است.',
@@ -35,6 +37,8 @@ function build() {
       <header class="tk-head wf-head"><input id="wfName" dir="auto" class="wf-name" placeholder="نام ورک‌فلو">
         <label class="help wf-sched">${ic('clock', 'sm')}هر روز ساعت <input id="wfSched" type="time" dir="ltr"></label>
         <button type="button" class="btn btn-sm" id="wfSave">${ic('save', 'sm')}ذخیره</button>
+        <button type="button" class="btn btn-sm" id="wfConn" title="شروع این ورک‌فلو از n8n یا برنامه‌های دیگر، و تنظیم n8n">${ic('plug', 'sm')}اتصال‌ها</button>
+        <button type="button" class="btn btn-sm" id="wf3d" aria-pressed="false" title="نمای سه‌بعدی: با موس بکشید تا بچرخد، با چرخ موس بزرگ/کوچک کنید">${ic('box', 'sm')}سه‌بعدی</button>
         <button type="button" class="btn btn-sm btn-primary" id="wfRun">${ic('play', 'sm')}اجرا</button>
         <button type="button" class="icon-btn" id="wfDel" title="حذف" aria-label="حذف">${ic('trash-2')}</button></header>
       <div class="wf-palette" id="wfPal"></div>
@@ -53,6 +57,10 @@ function build() {
   $('#wfSched').onchange = () => { if (W.cur) { W.cur.schedule = $('#wfSched').value; W.dirty = true; } };
   const cv = $('#wfCanvas');
   cv.addEventListener('pointerdown', onDown);
+  $('#wfConn').onclick = connDialog;
+  $('#wf3d').onclick = () => set3d(!W.three);
+  cv.addEventListener('wheel', e => { if (!W.three) return; e.preventDefault(); W.zoom = Math.max(.45, Math.min(1.8, W.zoom * (e.deltaY > 0 ? .92 : 1.08))); apply3d(); }, { passive: false });
+  cv.addEventListener('dblclick', e => { if (W.three && !e.target.closest('[data-node]')) { W.rx = 28; W.ry = -14; W.zoom = 1; W.vx = W.vy = 0; apply3d(); } });
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
   $('#wfWaiting').onclick = onAnswerClick;
@@ -95,7 +103,8 @@ function renderCanvas() {
   const doneIds = new Set(W.run ? W.run.steps.filter(s => s.status === 'done').map(s => s.nodeId) : []);
   $('#wfNodes').innerHTML = w.nodes.map(n => {
     const t = types[n.type];
-    return `<div class="wf-node t-${n.type} ${W.sel === n.id ? 'sel' : ''} ${active === n.id ? 'live' : ''} ${doneIds.has(n.id) ? 'did' : ''}" data-node="${esc(n.id)}" style="left:${n.x}px;top:${n.y}px">
+    const z = W.three ? (40 + (Math.round(n.x / 220) % 3) * 30) : 0;
+    return `<div class="wf-node t-${n.type} ${W.sel === n.id ? 'sel' : ''} ${active === n.id ? 'live' : ''} ${doneIds.has(n.id) ? 'did' : ''}" data-node="${esc(n.id)}" style="left:${n.x}px;top:${n.y}px;--z:${z}px">
       <div class="wf-n-head">${ic(ICON[n.type], 'sm')}<span>${esc(t.label)}</span><code>${esc(n.id)}</code></div>
       <div class="wf-n-title" dir="auto">${esc(n.title || summary(n) || '—')}</div>
       <div class="wf-ports">${t.outs.map(p => `<span class="wf-port p-${p}" data-port="${p}" title="کشیدن برای وصل کردن${PORT_FA[p] ? ' (' + PORT_FA[p] + ')' : ''}">${PORT_FA[p] ? `<i>${PORT_FA[p]}</i>` : ''}</span>`).join('')}</div>
@@ -120,7 +129,42 @@ function drawEdges(temp) {
   }).join('') + (temp ? `<path class="wf-edge temp" d="${path(temp.a, temp.b)}"/>` : '');
 }
 function canvasPoint(e) { const r = $('#wfCanvas').getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+// ---- 3D view: drag anywhere to rotate (with momentum), wheel to zoom, double-click to reset ----
+Object.assign(W, { three: false, rx: 28, ry: -14, zoom: 1, vx: 0, vy: 0, rot: null, spin: 0 });
+function set3d(on) {
+  W.three = on;
+  const b = $('#wf3d'); b.setAttribute('aria-pressed', String(on)); b.classList.toggle('on', on);
+  $('#wfCanvas').closest('.wf-scroll').classList.toggle('three', on);
+  if (on) { apply3d(); tick3d(); } else { cancelAnimationFrame(W.spin); $('#wfCanvas').style.transform = ''; }
+  renderCanvas();
+}
+// fit the whole graph into the frame, centred, then tilt it
+function apply3d() {
+  const cv = $('#wfCanvas'), box = cv.closest('.wf-scroll');
+  const fit = Math.min(box.clientWidth / cv.offsetWidth, box.clientHeight / cv.offsetHeight, 1) * .72;
+  cv.style.transform = `translate(-50%, -50%) perspective(1800px) rotateX(${W.rx}deg) rotateY(${W.ry}deg) scale(${(W.zoom * fit).toFixed(3)})`;
+}
+function tick3d() {
+  cancelAnimationFrame(W.spin);
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const step = () => {
+    if (!W.three) return;
+    if (!W.rot) {
+      // momentum after a flick, then a slow idle sway
+      W.vx *= .94; W.vy *= .94;
+      if (Math.abs(W.vx) + Math.abs(W.vy) > .02) { W.ry = Math.max(-75, Math.min(75, W.ry + W.vx)); W.rx = Math.max(-50, Math.min(55, W.rx - W.vy)); }
+      else if (!reduce) W.ry += Math.sin(performance.now() / 2600) * .04;
+      apply3d();
+    }
+    W.spin = requestAnimationFrame(step);
+  };
+  W.spin = requestAnimationFrame(step);
+}
 function onDown(e) {
+  if (W.three) {
+    W.rot = { x: e.clientX, y: e.clientY, rx: W.rx, ry: W.ry, lx: e.clientX, ly: e.clientY, moved: false, node: e.target.closest('[data-node]') };
+    e.preventDefault(); return;
+  }
   const edge = e.target.closest('[data-edge]');
   if (edge) { if (confirm('این اتصال حذف شود؟')) { W.cur.edges.splice(+edge.dataset.edge, 1); W.dirty = true; drawEdges(); } return; }
   const port = e.target.closest('[data-port]'), node = e.target.closest('[data-node]');
@@ -133,6 +177,13 @@ function onDown(e) {
   e.preventDefault();
 }
 function onMove(e) {
+  if (W.rot) {
+    const dx = e.clientX - W.rot.x, dy = e.clientY - W.rot.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) W.rot.moved = true;
+    W.ry = Math.max(-75, Math.min(75, W.rot.ry + dx * .22)); W.rx = Math.max(-50, Math.min(55, W.rot.rx - dy * .2));
+    W.vx = (e.clientX - W.rot.lx) * .22; W.vy = (e.clientY - W.rot.ly) * .2; W.rot.lx = e.clientX; W.rot.ly = e.clientY;
+    apply3d(); return;
+  }
   if (W.drag) {
     const p = canvasPoint(e), n = W.drag.n;
     n.x = Math.max(0, Math.round((p.x - W.drag.dx) / 10) * 10); n.y = Math.max(0, Math.round((p.y - W.drag.dy) / 10) * 10);
@@ -141,6 +192,11 @@ function onMove(e) {
   } else if (W.link) drawEdges({ a: portPos(W.link.from, W.link.port), b: canvasPoint(e) });
 }
 function onUp(e) {
+  if (W.rot) {
+    const r = W.rot; W.rot = null;
+    if (!r.moved) { W.vx = W.vy = 0; if (r.node) { W.sel = r.node.dataset.node; renderCanvas(); renderProps(); } }
+    return;
+  }
   if (W.drag) { if (W.drag.moved) W.dirty = true; W.drag = null; }
   if (W.link) {
     const t = document.elementFromPoint(e.clientX, e.clientY); const node = t && t.closest('[data-node]');
@@ -156,6 +212,8 @@ function onUp(e) {
 }
 function summary(n) {
   const c = n.config || {};
+  if (n.type === 'webhook') return ((SERVICES[c.service] || SERVICES.custom).label + ' · ' + (c.url || '').replace(/^https?:\/\//, '')).slice(0, 60);
+  if (n.type === 'subflow') { const w = (W.data.list || []).find(x => x.id === c.workflowId); return w ? '→ ' + w.name : ''; }
   return ({ llm: c.prompt, agent: c.task, ask: c.question, approve: c.question, condition: c.op === 'ai' ? 'هوش مصنوعی: ' + (c.arg || '') : (c.op || 'contains') + ' «' + (c.arg || '') + '»', task: c.title, notify: c.text, http: c.url, delay: c.minutes ? faN(c.minutes) + ' دقیقه' : '' }[n.type] || '').slice(0, 60);
 }
 
@@ -175,6 +233,8 @@ function renderProps() {
     ask: f('question', 'سؤال', 'area'), approve: f('question', 'سؤال تأیید', 'area'),
     condition: f('value', 'چه چیزی بررسی شود', 'text', '<div class="help">پیش‌فرض: {{last}}</div>') + sel('op', 'شرط', [['contains', 'شامل باشد'], ['equals', 'برابر باشد'], ['regex', 'الگو (regex)'], ['empty', 'خالی باشد'], ['ai', 'هوش مصنوعی تصمیم بگیرد']]) + f('arg', 'مقدار / سؤال', 'text'),
     task: f('title', 'عنوان تسک') + f('due', 'زمان (اختیاری، مثل 2026-11-20T10:00)', 'text') + sel('category', 'دسته', [['life', 'زندگی'], ['work', 'کار']]),
+    webhook: sel('service', 'سرویس', Object.entries(SERVICES).map(([k, v]) => [k, v.label])) + f('url', 'آدرس Webhook', 'url', `<div class="help">${esc((SERVICES[c.service] || SERVICES.custom).help)}</div><button type="button" class="btn btn-sm" id="wfPickN8n">${ic('plug', 'sm')}انتخاب از ورک‌فلوهای n8n</button>`) + sel('method', 'روش', [['POST', 'POST — فرستادن داده'], ['GET', 'GET']]) + f('body', 'بدنه (JSON)', 'area', '<div class="help">پیش‌فرض: {"input": {{json_last}}, "from": "jarvis"}</div>') + f('timeout', 'حداکثر انتظار (ثانیه)', 'number'),
+    subflow: sel('workflowId', 'کدام ورک‌فلو؟', [['', '— انتخاب کنید —'], ...(W.data.list || []).filter(x => x.id !== W.cur.id).map(x => [x.id, x.name])]) + f('input', 'ورودی آن (پیش‌فرض {{last}})'),
     notify: f('text', 'متن پیام', 'area'), http: f('url', 'آدرس (https)', 'url'), delay: f('minutes', 'چند دقیقه', 'number'),
   }[n.type] || '';
   box.innerHTML = `<h3>${ic(ICON[n.type], 'sm')}${esc(W.data.types[n.type].label)} <code dir="ltr">${esc(n.id)}</code></h3>
@@ -189,9 +249,50 @@ function renderProps() {
     W.dirty = true;
     const el = document.querySelector(`[data-node="${CSS.escape(n.id)}"] .wf-n-title`); if (el) el.textContent = n.title || summary(n) || '—';
   };
+  const pk = $('#wfPickN8n'); if (pk) pk.onclick = () => pickN8n(n);
   const del = $('#wfDelNode'); if (del) del.onclick = () => { W.cur.nodes = W.cur.nodes.filter(x => x.id !== n.id); W.cur.edges = W.cur.edges.filter(x => x.from !== n.id && x.to !== n.id); W.sel = null; W.dirty = true; renderCanvas(); renderProps(); };
 }
 
+const SERVICES = {
+  n8n: { label: 'n8n', help: 'در n8n یک گره‌ی Webhook بسازید و ورک‌فلو را فعال کنید؛ آدرس Production آن را اینجا بگذارید (یا «انتخاب از n8n»).' },
+  zapier: { label: 'Zapier', help: 'در Zapier تریگر «Webhooks by Zapier → Catch Hook» را بسازید و آدرسش را اینجا بگذارید.' },
+  make: { label: 'Make', help: 'در Make ماژول «Webhooks → Custom webhook» را بسازید و آدرسش را اینجا بگذارید.' },
+  pipedream: { label: 'Pipedream', help: 'یک ورک‌فلو با تریگر HTTP بسازید و آدرسش را اینجا بگذارید.' },
+  custom: { label: 'سرویس دیگر', help: 'هر آدرسی که JSON بگیرد (https، یا http روی همین کامپیوتر).' },
+};
+async function n8nForm(onList) {
+  let d; try { d = await api('/workflows/n8n'); } catch (e) { d = { url: '', list: { error: e.message } }; }
+  const listHtml = l => !l ? '' : l.error ? `<div class="bad">${esc(l.error)}</div>` : !l.length ? '<div class="help">ورک‌فلویی پیدا نشد.</div>'
+    : `<ul class="cc-list">${l.map(w => `<li><span class="dot ${w.active ? 'live' : ''}"></span><div><b dir="auto">${esc(w.name)}</b><span class="help">${w.active ? 'فعال' : 'غیرفعال (برای آدرس Production فعالش کنید)'} · ${w.hooks.length ? faN(w.hooks.length) + ' Webhook' : 'Webhook ندارد'}</span></div>${w.hooks.map((h, i) => `<button type="button" class="btn btn-sm" data-n8n="${esc(w.id)}" data-hk="${i}">${ic('plug', 'sm')}${esc(h.method)} · ${esc(h.name)}</button>`).join('')}</li>`).join('')}</ul>`;
+  return { d, html: `<div class="field-row"><div class="field"><label>آدرس n8n</label><input id="n8nUrl" dir="ltr" value="${esc(d.url)}" placeholder="http://localhost:5678"></div>
+      <div class="field"><label>کلید API (n8n ← Settings ← n8n API)</label><input id="n8nKey" type="password" dir="ltr" placeholder="${d.hasKey ? 'ذخیره شده — برای تغییر وارد کنید' : 'اختیاری، برای دیدن فهرست'}"></div></div>
+      <button type="button" class="btn btn-sm" id="n8nSave">${ic('refresh-cw', 'sm')}ذخیره و دریافت فهرست</button><div id="n8nList">${listHtml(d.list)}</div>`, listHtml };
+}
+async function pickN8n(node) {
+  const f = await n8nForm();
+  window.dialog(`<div class="dlg-scroll"><h3>${ic('plug')}انتخاب ورک‌فلو از n8n</h3>${f.html}</div><div class="dlg-actions"><button class="btn ghost" value="cancel">بستن</button></div>`, true);
+  let list = Array.isArray(f.d.list) ? f.d.list : [];
+  $('#n8nSave').onclick = async () => { try { const r = await api('/workflows/n8n', { body: { url: $('#n8nUrl').value, apiKey: $('#n8nKey').value } }); list = Array.isArray(r.list) ? r.list : []; $('#n8nList').innerHTML = f.listHtml(r.list); } catch (e) { window.toast(e.message, true); } };
+  $('#dlgBody').onclick = e => { const b = e.target.closest('[data-n8n]'); if (!b) return; const w = list.find(x => x.id === b.dataset.n8n); const h = w.hooks[+b.dataset.hk];
+    Object.assign(node.config, { service: 'n8n', url: h.url, method: h.method === 'GET' ? 'GET' : 'POST' }); if (!node.title) node.title = 'n8n: ' + w.name; W.dirty = true; $('#dlg').close(); renderCanvas(); renderProps(); window.toast('وصل شد — یادتان باشد ورک‌فلوی n8n فعال باشد'); };
+}
+async function connDialog() {
+  if (!W.cur.id || W.dirty) { const w = await save(); if (!w) return; }
+  const w = await api('/workflows/' + W.cur.id);
+  const f = await n8nForm();
+  window.dialog(`<div class="dlg-scroll"><h3>${ic('plug')}اتصال‌های «${esc(w.name)}»</h3>
+    <h4>${ic('download', 'sm')}شروع این ورک‌فلو از بیرون (n8n، Zapier، اسکریپت…)</h4>
+    <label class="check"><input type="checkbox" id="hkOn" ${w.hookOn ? 'checked' : ''}> با صدا زدن آدرس زیر شروع شود</label>
+    <div class="field"><label>آدرس (فقط از همین کامپیوتر قابل دسترسی است)</label><div class="row-gap"><input id="hkUrl" dir="ltr" readonly value="${esc(w.hookUrl)}"><button type="button" class="btn btn-sm" id="hkCopy">${ic('copy', 'sm')}کپی</button><button type="button" class="btn btn-sm ghost" id="hkNew" title="آدرس قبلی از کار می‌افتد">${ic('refresh-cw', 'sm')}کلید تازه</button></div>
+      <div class="help">در n8n یک گره‌ی «HTTP Request» با روش POST و بدنه‌ی JSON مثل <code dir="ltr">{"input": "…"}</code> بگذارید. با <code dir="ltr">?wait=1</code> تا پایان کار (حداکثر ۲ دقیقه) صبر می‌کند و خروجی را برمی‌گرداند. آدرس فقط روی همین کامپیوتر کار می‌کند؛ پورت برنامه ممکن است بعد از هر بار اجرا عوض شود.</div></div>
+    <h4>${ic('plug', 'sm')}n8n</h4>${f.html}
+    <p class="help">برای صدا زدن n8n/Zapier/Make از داخل ورک‌فلو، گره‌ی «n8n / Zapier / Make» را از نوار بالا اضافه کنید.</p></div>
+    <div class="dlg-actions"><button class="btn ghost" value="cancel">بستن</button></div>`, true);
+  $('#hkOn').onchange = async e => { W.cur.hookOn = e.target.checked; await save(); };
+  $('#hkCopy').onclick = async () => { try { await navigator.clipboard.writeText($('#hkUrl').value); window.toast('کپی شد'); } catch {} };
+  $('#hkNew').onclick = async () => { if (!confirm('آدرس فعلی از کار بیفتد و آدرس تازه ساخته شود؟')) return; const r = await api(`/workflows/${W.cur.id}/hook-key`, { body: {} }); $('#hkUrl').value = r.hookUrl; };
+  $('#n8nSave').onclick = async () => { try { const r = await api('/workflows/n8n', { body: { url: $('#n8nUrl').value, apiKey: $('#n8nKey').value } }); $('#n8nList').innerHTML = f.listHtml(r.list); } catch (e) { window.toast(e.message, true); } };
+}
 async function save() {
   try { const w = await api('/workflows', { body: W.cur }); W.cur.id = w.id; W.dirty = false; window.toast('ذخیره شد'); await load(); return w; }
   catch (e) { window.toast(e.message, true); return null; }

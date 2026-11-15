@@ -179,6 +179,31 @@ const workflows = new Workflows(DATA, {
   },
   onEvent: ev => broadcast(ev),
 });
+async function handleHook(req, res, url, id, key) {
+  const w = workflows.get(id);
+  const crypto = require('crypto');
+  if (!w || !w.hookOn || !w.hookKey || w.hookKey.length !== key.length || !crypto.timingSafeEqual(Buffer.from(w.hookKey), Buffer.from(key))) return send(res, 404, { error: 'not found' });
+  let input = url.searchParams.get('input') || '';
+  if (req.method === 'POST') { const b = await readBody(req).catch(() => null); if (b && typeof b === 'object') input = typeof b.input === 'string' ? b.input : JSON.stringify(b); }
+  const r = workflows.start(id, String(input).slice(0, 20000), { via: 'webhook' });
+  if (url.searchParams.get('wait') !== '1') return send(res, 202, { ok: true, runId: r.id });
+  const until = Date.now() + 120000;
+  while (!['done', 'error', 'stopped', 'waiting'].includes(r.status) && Date.now() < until) await new Promise(x => setTimeout(x, 300));
+  return send(res, 200, { ok: r.status === 'done', status: r.status, runId: r.id, output: String(r.ctx.last || ''), error: r.error || null });
+}
+// n8n: list workflows that start with a Webhook node (to pick one in the editor)
+async function n8nWorkflows() {
+  const s = store.settings(), base = String(s.n8nUrl || '').replace(/\/+$/, ''), key = setup.secrets.get('n8nApiKey');
+  if (!base) throw new Error('آدرس n8n را وارد کنید');
+  const r = await fetch(base + '/api/v1/workflows?limit=200', { headers: key ? { 'X-N8N-API-KEY': key } : {}, signal: AbortSignal.timeout(15000) });
+  if (r.status === 401) throw new Error('کلید API n8n پذیرفته نشد (n8n ← Settings ← n8n API)');
+  if (!r.ok) throw new Error('n8n جواب نداد: ' + r.status);
+  const j = await r.json();
+  return (j.data || []).map(w => {
+    const hooks = (w.nodes || []).filter(n => /webhook$/i.test(n.type || '') && !/respond/i.test(n.type || ''));
+    return { id: w.id, name: w.name, active: !!w.active, hooks: hooks.map(n => ({ name: n.name, method: (n.parameters && n.parameters.httpMethod) || 'GET', url: base + '/webhook/' + String((n.parameters && n.parameters.path) || n.webhookId || '').replace(/^\/+/, ''), testUrl: base + '/webhook-test/' + String((n.parameters && n.parameters.path) || n.webhookId || '').replace(/^\/+/, '') })) };
+  });
+}
 setInterval(() => { try { workflows.tick(); } catch (e) { console.error('workflows', e.message); } }, 30000).unref();
 const agentKit = require('./lib/agent-kit');
 const { Talks } = require('./lib/talks');
@@ -786,6 +811,15 @@ async function api(req, res, url) {
       const id = parts[1];
       if (!id && m === 'GET') return send(res, 200, { list: workflows.all(), templates: WF_TEMPLATES, types: WF_TYPES, waiting: workflows.waiting().map(r => workflows.view(r)) });
       if (!id && m === 'POST') { const w = workflows.save(body || {}); broadcast({ type: 'workflows' }); return send(res, 200, w); }
+      if (id === 'n8n' && m === 'GET') return send(res, 200, { url: store.settings().n8nUrl || '', hasKey: !!setup.secrets.get('n8nApiKey'), list: store.settings().n8nUrl ? await n8nWorkflows().catch(e => ({ error: e.message })) : [] });
+      if (id === 'n8n' && m === 'POST') {
+        const u = String(body.url || '').trim().replace(/\/+$/, '');
+        if (u && !/^https?:\/\/[^\s]+$/i.test(u)) throw new Error('آدرس n8n معتبر نیست');
+        store.updateSettings({ n8nUrl: u });
+        if (typeof body.apiKey === 'string' && body.apiKey.trim()) setup.secrets.set('n8nApiKey', body.apiKey.trim().slice(0, 400));
+        if (body.clearKey) setup.secrets.set('n8nApiKey', null);
+        return send(res, 200, { ok: true, list: u ? await n8nWorkflows().catch(e => ({ error: e.message })) : [] });
+      }
       if (id === 'generate' && m === 'POST') {
         const s = store.settings();
         const spec = String(body.model || '') || ((await voiceOnline(s)) ? (s.voiceModel || 'claude-haiku-5-5') : offlineSpec(s));
@@ -802,7 +836,8 @@ async function api(req, res, url) {
       }
       const w = workflows.get(id);
       if (!w) return send(res, 404, { error: 'ورک‌فلو پیدا نشد' });
-      if (!parts[2] && m === 'GET') return send(res, 200, { ...w, runs: workflows.runsOf(id).map(r => workflows.view(r)) });
+      if (!parts[2] && m === 'GET') return send(res, 200, { ...w, hookUrl: `http://127.0.0.1:${PORT}/hook/${w.id}/${w.hookKey}`, runs: workflows.runsOf(id).map(r => workflows.view(r)) });
+      if (parts[2] === 'hook-key' && m === 'POST') { w.hookKey = require('crypto').randomBytes(12).toString('hex'); workflows._save(); return send(res, 200, { hookUrl: `http://127.0.0.1:${PORT}/hook/${w.id}/${w.hookKey}` }); }
       if (!parts[2] && m === 'DELETE') { workflows.remove(id); broadcast({ type: 'workflows' }); return send(res, 200, { ok: true }); }
       if (parts[2] === 'run' && m === 'POST') return send(res, 200, workflows.view(workflows.start(id, body.input)));
     } catch (e) { return send(res, 400, { error: e.message }); }
@@ -1142,7 +1177,10 @@ async function handle(req, res) {
   // Block DNS-rebinding and cross-site requests: only our own origin may talk to us.
   const host = (req.headers.host || '').toLowerCase();
   if (host !== `127.0.0.1:${PORT}` && host !== `localhost:${PORT}`) return send(res, 403, 'forbidden host');
+  // /hook/<workflow id>/<key>: start a workflow from another program on this computer (n8n, scripts…)
   const url = new URL(req.url, `http://${host}`);
+  { const hm = /^\/hook\/([\w-]{1,24})\/([a-f0-9]{24})$/.exec(url.pathname);
+    if (hm && (req.method === 'POST' || req.method === 'GET')) return handleHook(req, res, url, hm[1], hm[2]); }
   if (url.pathname.startsWith('/api/')) {
     if (req.method !== 'GET' && req.headers['x-jarvis'] !== '1') return send(res, 403, 'missing header');
     if (tokenRequired() && !tokenOk(req.headers['x-jarvis-token'] || url.searchParams.get('token'))) return send(res, 401, { error: 'token required' });

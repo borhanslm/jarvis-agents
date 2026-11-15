@@ -312,3 +312,15 @@
 .page-view.on .ag-grid > :nth-child(2) { animation-delay: .04s; } .page-view.on .ag-grid > :nth-child(3) { animation-delay: .08s; } .page-view.on .ag-grid > :nth-child(4) { animation-delay: .12s; } .page-view.on .ag-grid > :nth-child(n+5) { animation-delay: .16s; }
 @media (max-width: 860px) { .ag-kinds { grid-template-columns: 1fr; } .wz-steps li { font-size: 0; } .wz-steps li span { font-size: 11px; } .ag-acts .chat-search { width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .page-view.on .ag-grid > * { animation: none !important; } }
+
+/* ---- Workflows: 3D view ---- */
+.wf-scroll.three { position: relative; overflow: hidden; cursor: grab; background: radial-gradient(ellipse at 50% 40%, color-mix(in srgb, var(--color-primary) 10%, transparent), transparent 70%); }
+.wf-scroll.three:active { cursor: grabbing; }
+.wf-scroll.three .wf-canvas { position: absolute; left: 50%; top: 50%; min-width: 0; min-height: 0; transform-style: preserve-3d; transform-origin: 50% 50%; transition: none; margin: 0; box-shadow: 0 0 0 1px var(--hud-line, var(--color-border)), 0 40px 120px rgba(0, 0, 0, .55); border-radius: 4px; }
+.wf-scroll.three .wf-node { transform: translateZ(var(--z, 40px)); box-shadow: 0 18px 40px rgba(0, 0, 0, .5), 0 0 18px color-mix(in srgb, var(--color-primary) 22%, transparent); cursor: pointer; }
+.wf-scroll.three .wf-edges { transform: translateZ(1px); }
+.wf-scroll.three .wf-edge { filter: drop-shadow(0 0 4px var(--color-primary)); }
+.wf-scroll.three .wf-port { cursor: inherit; }
+#wf3d.on { background: var(--color-primary-soft); color: var(--color-primary); border-color: var(--color-primary-line); }
+.wf-scroll.three #wfNodes { transform-style: preserve-3d; }
+.wf-scroll.three::after { content: "بکشید تا بچرخد · چرخ موس: بزرگ‌نمایی · دوبار کلیک: حالت اول"; position: absolute; bottom: 10px; left: 0; right: 0; text-align: center; font-size: 12px; color: var(--color-fg-muted); pointer-events: none; }
