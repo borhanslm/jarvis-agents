@@ -103,12 +103,24 @@ async function voiceOnline(s) {
 const offlineSpec = s => (s.voiceModelOffline ? 'ollama:' + s.voiceModelOffline : null);
 const isLocalSpec = spec => /^ollama:/.test(spec || '') || (() => { const m = /^p:([a-z0-9-]+):/.exec(spec || ''); const p = m && providers.get(m[1]); return !!(p && /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])/.test(p.baseUrl)); })();
 // Any language model, for chat / voice / Telegram (starts Ollama when needed)
-const chatLLM = async opts => { if (/^ollama:/.test(opts.spec || '')) await ollama.ensureRunning(); return llm.chat({ ...opts, deps: llmDeps() }); };
+// "agent:<id>" = a standalone assistant agent: its instructions + its model (or the assistant's model)
+function agentSpec(spec, system) {
+  const m = /^agent:([\w-]{1,40})$/.exec(spec || '');
+  if (!m) return { spec, system };
+  const a = store.subagents().find(x => x.id === m[1]);
+  if (!a) throw new Error('ایجنت پیدا نشد');
+  const own = /^(claude-|p:|ollama:)/.test(a.model || '') ? a.model : (store.settings().voiceModel || 'claude-haiku-5-5');
+  // the agent's own instructions lead; JARVIS's general chat persona is not added on top
+  const extra = system && !/^You are JARVIS/.test(system) ? '\n\n' + system : '';
+  return { spec: own, system: a.prompt + extra + '\n\n(Today: ' + new Date().toDateString() + '.)' };
+}
+const chatLLM = async opts => { const r = agentSpec(opts.spec, opts.system); if (/^ollama:/.test(r.spec || '')) await ollama.ensureRunning(); return llm.chat({ ...opts, spec: r.spec, system: r.system, deps: llmDeps() }); };
 // Every model the panel can chat with: Claude, saved connections, local Ollama models.
 async function chatModels() {
   const viaKey = !!setup.secrets.get('anthropicApiKey');
   const out = require('./lib/models').CLAUDE.map(m => ({ spec: m.id, name: m.name, group: 'Claude', note: viaKey ? 'کلید API' : 'Claude Code', ok: true, local: false }));
   for (const p of providers.view()) for (const m of p.models) { const local = isLocalSpec('p:' + p.id + ':' + m); out.push({ spec: 'p:' + p.id + ':' + m, name: m, group: p.name, note: p.hasKey || local ? '' : 'کلید ندارد', ok: p.hasKey || local, local }); }
+  for (const a of store.subagents().filter(x => x.stage === 'assistant' && x.enabled)) out.push({ spec: 'agent:' + a.id, name: a.name, group: 'ایجنت‌های من', note: a.description.slice(0, 40), ok: true, local: false, agent: true });
   const ol = await ollama.status();
   for (const m of ol.models) out.push({ spec: 'ollama:' + m.name, name: m.name, group: 'Ollama (آفلاین)', note: (m.size / 1e9).toFixed(1) + ' GB', ok: true, local: true });
   return out;
@@ -155,12 +167,13 @@ const workflows = new Workflows(DATA, {
   onEvent: ev => broadcast(ev),
 });
 setInterval(() => { try { workflows.tick(); } catch (e) { console.error('workflows', e.message); } }, 30000).unref();
+const agentKit = require('./lib/agent-kit');
 const { Talks } = require('./lib/talks');
 const talks = new Talks(DATA, { chat: chatLLM, onEvent: ev => broadcast(ev) });
 // No internet + an online model chosen: answer with the offline model (mode "auto" only)
 async function talkSpec(spec) {
   const s = store.settings();
-  if (isLocalSpec(spec) || s.voiceMode === 'online' || !s.voiceModelOffline) return spec;
+  if (/^agent:/.test(spec) || isLocalSpec(spec) || s.voiceMode === 'online' || !s.voiceModelOffline) return spec;
   return (await net.online()) ? spec : 'ollama:' + s.voiceModelOffline;
 }
 const { Brain } = require('./lib/voice/brain');
@@ -679,6 +692,31 @@ async function api(req, res, url) {
     if (!parts[1] && m === 'POST') {
       try { const a = store.saveSubagent(body); done(); return send(res, 200, a); }
       catch (e) { return send(res, 400, { error: e.message }); }
+    }
+    if (parts[1] === 'templates' && m === 'GET') return send(res, 200, agentKit.TEMPLATES);
+    if (parts[1] === 'import' && m === 'POST') {
+      try { const list = agentKit.parseImport(body.text); const saved = []; for (const a of list) { let n = String(a.name || 'agent'), k = 2; while (store.subagents().some(x => x.name === n.toLowerCase())) n = a.name + '-' + k++; saved.push(store.saveSubagent({ ...a, name: n })); } done(); return send(res, 200, saved); }
+      catch (e) { return send(res, 400, { error: e.message }); }
+    }
+    if (parts[1] === 'improve' && m === 'POST') {
+      try { const s = store.settings(); const spec = (await voiceOnline(s)) ? (s.voiceModel || 'claude-haiku-5-5') : offlineSpec(s); if (!spec) throw new Error('اینترنت نیست و مدل آفلاین انتخاب نشده'); return send(res, 200, { prompt: await agentKit.improvePrompt(chatLLM, spec, body || {}) }); }
+      catch (e) { return send(res, 400, { error: e.message }); }
+    }
+    const ag = parts[1] && store.subagents().find(x => x.id === parts[1]);
+    if (ag && parts[2] === 'export' && m === 'GET') return send(res, 200, { json: JSON.stringify((({ versions, ...x }) => x)(ag), null, 2), md: agentKit.toMarkdown(ag) });
+    if (ag && parts[2] === 'restore' && m === 'POST') {
+      try { const v = (ag.versions || [])[+body.index]; if (!v) throw new Error('نسخه پیدا نشد'); const { savedAt, ...old } = v; const a = store.saveSubagent({ ...old, id: ag.id }); done(); return send(res, 200, a); }
+      catch (e) { return send(res, 400, { error: e.message }); }
+    }
+    if (ag && parts[2] === 'test' && m === 'POST') {
+      // a conversation test of the agent's instructions (no file access)
+      const t0 = Date.now();
+      try {
+        const s = store.settings();
+        const own = /^(claude-|p:|ollama:)/.test(ag.model || '') ? ag.model : (s.voiceModel || 'claude-haiku-5-5');
+        const r = await chatLLM({ spec: String(body.model || '') || own, system: ag.prompt + '\n\n(Test run inside JARVIS: there is no file or tool access here. Follow your instructions exactly as in real use.)', messages: [{ role: 'user', content: String(body.text || '').slice(0, 8000) }], maxTokens: 1500, signal: AbortSignal.timeout(120000) });
+        return send(res, 200, { ok: true, text: r.text, ms: Date.now() - t0, model: String(body.model || '') || own });
+      } catch (e) { return send(res, 200, { ok: false, error: e.message, ms: Date.now() - t0 }); }
     }
     if (parts[1] && m === 'DELETE') { store.deleteSubagent(parts[1]); done(); return send(res, 200, { ok: true }); }
   }

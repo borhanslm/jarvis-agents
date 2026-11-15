@@ -1033,14 +1033,16 @@ $('#input').onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)
 
 // ---------- sub-agents ----------
 const STAGE = { review: 'تستر موازی', builder: 'کمکِ سازنده' };
+// an agent icon is an icon name (new) or an emoji (older agents)
+function agentIcon(a, cls = 'sm') { const i = String(a.icon || 'bot'); return /^[a-z0-9-]+$/.test(i) ? ic(i, cls) : ic(iconText(i + ' x').icon || 'bot', cls); }
 function renderSubagents() {
   const ul = $('#subList');
   ul.innerHTML = S.subagents.length ? S.subagents.map(a => `<li data-sub="${esc(a.id)}" class="${a.enabled ? '' : 'off'}" title="${esc(a.description || a.prompt.slice(0, 200))}">
       <input type="checkbox" data-toggle="${esc(a.id)}" ${a.enabled ? 'checked' : ''} title="فعال/غیرفعال">
-      <span>${esc(a.icon)}</span><span class="name" dir="ltr" style="text-align:right">${esc(a.name)}</span>
+      <span>${agentIcon(a)}</span><span class="name" dir="ltr" style="text-align:right">${esc(a.name)}</span>
       ${(a.skills || []).length ? `<span class="skc" title="اسکیل‌ها">${ic('puzzle', 'sm')}${(a.skills.length).toLocaleString('fa-IR')}</span>` : ''}<span class="stage ${a.stage}" title="${a.stage === 'review' ? 'اجرا با: ' + esc(subRunnerLabel(a)) : 'داخل نشست سازنده اجرا می‌شود'}">${STAGE[a.stage]}${a.stage === 'review' ? ' · ' + esc(subRunnerShort(a)) : ''}</span></li>`).join('')
     : '<li class="empty">ساب‌ایجنتی تعریف نشده.</li>';
-  $('#mentions').innerHTML = S.subagents.map(a => `<button type="button" data-mention="${esc(a.name)}">${esc(a.icon)} @${esc(a.name)}</button>`).join('');
+  $('#mentions').innerHTML = S.subagents.filter(a => a.stage !== 'assistant').map(a => `<button type="button" data-mention="${esc(a.name)}">${agentIcon(a)} @${esc(a.name)}</button>`).join('');
 }
 function subagentDialog(a, draft) {
   const isNew = !a;

@@ -65,7 +65,7 @@ function build() {
 async function loadAll() {
   try { C.models = await api('/llms'); } catch { C.models = []; }
   await loadList();
-  const want = (C.talk && C.talk.id) || lsGet('jarvis.talk', '');
+  const want = lsGet('jarvis.talk', '') || (C.talk && C.talk.id);
   if (want && C.list.some(t => t.id === want)) await open(want); else if (C.list.length) await open(C.list[0].id); else { C.talk = null; renderTalk(); }
 }
 async function loadList() {
