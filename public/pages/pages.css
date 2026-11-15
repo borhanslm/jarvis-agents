@@ -399,3 +399,6 @@ html.club-locked body > :not(#clubGate):not(.toast):not(script) { visibility: hi
 .cl-steps { margin: 0; padding-inline-start: 20px; display: flex; flex-direction: column; gap: 12px; line-height: 1.9; }
 .cl-log { direction: ltr; text-align: left; max-height: 180px; overflow: auto; }
 @media (max-width: 600px) { .sl-grid { grid-template-columns: 1fr; } .cl-msg { max-width: 100%; } }
+.cl-cf { margin-top: 8px; line-height: 1.9; }
+.cl-cf .row-gap { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.cl-cf .ic { vertical-align: -3px; }

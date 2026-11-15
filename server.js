@@ -212,10 +212,12 @@ const agentKit = require('./lib/agent-kit');
 // ---- the members club (required when a club address is set) ----
 const clubLib = require('./lib/club');
 const club = new clubLib.Club({ dataDir: DATA, secrets: setup.secrets, settings: () => store.settings(), defaultUrl: ((require('./package.json').jarvis || {}).clubUrl) || '' });
-const clubBroadcast = () => broadcast({ type: 'club', club: club.state() });
+const clubView = () => ({ ...club.state(), deploy: clubDeploy, cfLogin: clubLogin });
+const clubBroadcast = () => broadcast({ type: 'club', club: clubView() });
 setTimeout(() => club.refresh().then(clubBroadcast).catch(() => {}), 3000).unref();
 setInterval(() => club.refresh().then(clubBroadcast).catch(() => {}), 6 * 36e5).unref();
 let clubDeploy = null; // { running, log[], error, url }
+let clubLogin = null;  // Cloudflare sign-in: { running, url, ok, error }
 // tell the club about a license issued to a member (the seller must be signed in as the club admin)
 async function clubLicense(sale, revoked) {
   if (!sale.memberEmail || !club.url() || !club.token()) return null;
@@ -877,7 +879,7 @@ async function api(req, res, url) {
   }
   if (parts[0] === 'club') {
     try {
-      if (!parts[1] && m === 'GET') return send(res, 200, { ...club.state(), deploy: clubDeploy });
+      if (!parts[1] && m === 'GET') return send(res, 200, clubView());
       if (parts[1] === 'login' && m === 'POST') { const st = await club.login(body); clubBroadcast(); return send(res, 200, st); }
       if (parts[1] === 'register' && m === 'POST') { const st = await club.register(body); clubBroadcast(); return send(res, 200, st); }
       if (parts[1] === 'logout' && m === 'POST') { const st = await club.logout(); clubBroadcast(); return send(res, 200, st); }
@@ -888,14 +890,24 @@ async function api(req, res, url) {
         if (u) { const r = await fetch(u + '/api/health', { signal: AbortSignal.timeout(10000) }).then(x => x.json()).catch(() => ({})); if (r.name !== 'jarvis-club') throw new Error('این آدرس باشگاه جارویس نیست یا در دسترس نیست'); }
         store.updateSettings({ clubUrl: u }); clubBroadcast(); return send(res, 200, club.state());
       }
-      if (parts[1] === 'cf-login' && m === 'POST') { const r = await clubLib.login(); return send(res, 200, { ok: r.ok, out: r.out.slice(-600) }); }
+      if (parts[1] === 'cf-login' && m === 'POST') {
+        if (!(clubLogin && clubLogin.running)) {
+          clubLogin = { running: true, url: '', ok: false, error: '' };
+          clubLib.login({ onUrl: u => { clubLogin.url = u; require('./lib/setup').openExternal(u); clubBroadcast(); } })
+            .then(r => { clubLogin = { running: false, url: '', ok: r.ok, error: r.error }; })
+            .catch(e => { clubLogin = { running: false, url: '', ok: false, error: e.message }; })
+            .finally(clubBroadcast);
+        }
+        return send(res, 200, clubView());
+      }
+      if (parts[1] === 'cf-open' && m === 'POST') { if (clubLogin && clubLogin.url) require('./lib/setup').openExternal(clubLogin.url); return send(res, 200, { ok: !!(clubLogin && clubLogin.url) }); }
       if (parts[1] === 'deploy' && m === 'POST') {
         if (clubDeploy && clubDeploy.running) throw new Error('در حال راه‌اندازی است');
         clubDeploy = { running: true, log: [], error: '', url: '' };
         clubLib.deploy({ dataDir: DATA, adminEmail: body.adminEmail, log: l => { clubDeploy.log.push(l); clubBroadcast(); } })
           .then(r => { store.updateSettings({ clubUrl: r.url }); clubDeploy = { running: false, log: clubDeploy.log.concat('آماده شد: ' + r.url), error: '', url: r.url }; })
           .catch(e => { clubDeploy = { running: false, log: clubDeploy.log, error: e.message, needLogin: !!e.needLogin, url: '' }; })
-          .finally(() => broadcast({ type: 'club', club: { ...club.state(), deploy: clubDeploy } }));
+          .finally(clubBroadcast);
         return send(res, 200, { ...club.state(), deploy: clubDeploy });
       }
       if (parts[1] === 'api' && parts.length > 2) {

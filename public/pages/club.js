@@ -213,7 +213,7 @@ async function tabInbox(el) {
 
 // ---- setup (no club yet) ----
 function renderSetup() {
-  const d = (C.st && C.st.deploy) || null;
+  const d = (C.st && C.st.deploy) || null, L = (C.st && C.st.cfLogin) || null;
   C.el.innerHTML = `<div class="pg cl-page">
     <header class="pg-head"><div><h1>${ic('users')}باشگاه جارویس<span class="hud-tag" aria-hidden="true">SETUP</span></h1>
       <p class="help">باشگاه هنوز راه‌اندازی نشده. بعد از راه‌اندازی، هر کس جارویس (دسکتاپ یا اندروید) را باز کند باید عضو شود یا وارد شود. شما مدیر هستید و بقیه کاربر.</p></div></header>
@@ -221,7 +221,14 @@ function renderSetup() {
       <section class="sl-card"><h2>${ic('cloud-sun', 'sm')}راه‌اندازی رایگان در Cloudflare</h2>
         <ol class="cl-steps">
           <li>یک حساب رایگان Cloudflare بسازید: <a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener" dir="ltr">dash.cloudflare.com/sign-up</a></li>
-          <li><button type="button" class="btn btn-sm" id="clCf">${ic('log-in', 'sm')}ورود به Cloudflare</button> <span class="help">(مرورگر باز می‌شود؛ «Allow» را بزنید)</span></li>
+          <li><button type="button" class="btn btn-sm" id="clCf" ${L && L.running ? 'disabled' : ''}>${ic('log-in', 'sm')}${L && L.running ? 'در حال ورود…' : 'ورود به Cloudflare'}</button>
+            ${!L ? '<span class="help">(مرورگر باز می‌شود؛ «Allow» را بزنید)</span>'
+            : L.running && !L.url ? `<div class="help cl-cf">${ic('hourglass', 'sm')} آماده‌سازی ابزار Cloudflare… بار اول یکی دو دقیقه طول می‌کشد.</div>`
+            : L.running ? `<div class="help cl-cf">${ic('external-link', 'sm')} صفحه‌ی ورود Cloudflare در مرورگر باز شد. وارد شوید و <b dir="ltr">Allow</b> را بزنید (تا ۲ دقیقه). اگر مرورگر باز نشد:
+                <div class="row-gap"><button type="button" class="btn btn-sm btn-primary" id="clCfOpen">${ic('external-link', 'sm')}باز کردن صفحه‌ی ورود</button><button type="button" class="btn btn-sm ghost" id="clCfCopy">${ic('copy', 'sm')}کپی لینک</button></div>
+                <span class="help">لینک را در Chrome بچسبانید. باید در همین کامپیوتر باز شود.</span></div>`
+            : L.ok ? `<div class="ok cl-cf">${ic('circle-check', 'sm')} وارد Cloudflare شدید. حالا مرحله‌ی ۳.</div>`
+            : `<div class="bad cl-cf">${ic('circle-x', 'sm')} ${esc(L.error || 'ورود انجام نشد')}</div>`}</li>
           <li><div class="field"><label for="clAdm">ایمیل مدیر (همان ایمیلی که با آن در باشگاه عضو می‌شوید)</label><input id="clAdm" type="email" dir="ltr" placeholder="you@example.com"></div>
             <button type="button" class="btn btn-sm btn-primary" id="clDeploy" ${d && d.running ? 'disabled' : ''}>${ic('upload', 'sm')}${d && d.running ? 'در حال راه‌اندازی…' : 'ساخت باشگاه'}</button></li>
         </ol>
@@ -232,7 +239,10 @@ function renderSetup() {
         <div class="field"><label for="clUrl">آدرس باشگاه</label><input id="clUrl" dir="ltr" placeholder="https://jarvis-club.you.workers.dev"></div>
         <button type="button" class="btn btn-sm" id="clSave">${ic('save', 'sm')}اتصال</button></section>
     </div></div>`;
-  C.el.querySelector('#clCf').onclick = async e => { const b = e.currentTarget; b.disabled = true; toast('مرورگر برای ورود به Cloudflare باز می‌شود…'); try { const r = await api('/club/cf-login', { body: {} }); toast(r.ok ? 'وارد Cloudflare شدید' : 'ورود انجام نشد', !r.ok); } catch (x) { toast(x.message, true); } b.disabled = false; };
+  // sign-in runs in the background; progress comes back as «club» events
+  C.el.querySelector('#clCf').onclick = async () => { try { C.st = await api('/club/cf-login', { body: {} }); renderSetup(); } catch (x) { toast(x.message, true); } };
+  const op = C.el.querySelector('#clCfOpen'); if (op) op.onclick = () => api('/club/cf-open', { body: {} }).catch(x => toast(x.message, true));
+  const cp = C.el.querySelector('#clCfCopy'); if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText(L.url); toast('لینک کپی شد'); } catch { toast('کپی نشد', true); } };
   C.el.querySelector('#clDeploy').onclick = async () => { try { C.st = await api('/club/deploy', { body: { adminEmail: C.el.querySelector('#clAdm').value } }); renderSetup(); } catch (x) { toast(x.message, true); } };
   C.el.querySelector('#clSave').onclick = async () => { try { C.st = await api('/club/address', { body: { url: C.el.querySelector('#clUrl').value } }); window.JARVIS_CLUB = C.st; gate(); render(); } catch (x) { toast(x.message, true); } };
 }
