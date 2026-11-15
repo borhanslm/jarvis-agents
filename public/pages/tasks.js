@@ -25,7 +25,7 @@ function enter(host) {
 function build() {
   T.el.dataset.built = '1';
   T.el.innerHTML = `<div class="pg">
-    <header class="pg-head"><div><h1>${ic('list-checks')}تسک‌ها</h1>
+    <header class="pg-head"><div><h1>${ic('list-checks')}تسک‌ها<span class="hud-tag" aria-hidden="true">TASKS</span></h1>
       <p class="help">کارهای زندگی و کار، با یادآور. با صدا یا تلگرام هم می‌شود: «فردا ساعت ده یادم بنداز…». کارهای برنامه‌نویسی را با یک کلیک به تیم ایجنت‌ها بدهید.</p></div>
       <div class="pg-stat"><b id="tkOpenN">۰</b><span>باز</span></div></header>
     <section class="tq-add" id="tqAdd">

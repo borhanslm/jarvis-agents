@@ -30,7 +30,7 @@ async function render() {
   const modelRows = list => `<ul class="ai-models">${list.map(m => `<li><code dir="ltr">${esc(m.name)}</code>${m.note ? `<span class="help">${esc(m.note)}</span>` : ''}${testBtn(m.spec)}</li>`).join('')}</ul>`;
 
   el.innerHTML = `<div class="pg">
-    <header class="pg-head"><div><h1>${ic('brain')}هسته‌ی هوش مصنوعی</h1>
+    <header class="pg-head"><div><h1>${ic('brain')}هسته‌ی هوش مصنوعی<span class="hud-tag" aria-hidden="true">AI CORE</span></h1>
       <p class="help">همه‌ی مدل‌هایی که جارویس با آن‌ها کار می‌کند. هر کدام را اینجا اضافه و آزمایش کنید؛ بعد در چت، صدا، تلگرام و تیم کدنویسی قابل انتخاب‌اند.</p></div>
       <div class="pg-stat"><b>${faN(models.length)}</b><span>مدل آماده</span></div></header>
 

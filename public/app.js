@@ -1904,7 +1904,7 @@ function roleAgent(role) {
 function renderRoles() {
   const b = roleAgent('builder').name, r = roleAgent('reviewer').name;
   const sub = document.getElementById('brandSub');
-  if (sub) sub.textContent = 'تیم ایجنت‌های برنامه‌نویس';
+  if (sub) sub.textContent = 'دستیار هوشمند شخصی';
   const p = homeEl('#homeRoles');
   if (S.subagents) renderSubagents();
   const ba = roleAgent('builder'), ra = roleAgent('reviewer');

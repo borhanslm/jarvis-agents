@@ -129,7 +129,7 @@ export function makeHud(host, { label = 'JARVIS' } = {}) {
     ctx.stroke(); ctx.restore();
 
     // 10) small readouts around the ring (real time, not decoration numbers)
-    ctx.font = `600 ${Math.max(9, R * 0.045)}px "JetBrains Mono", monospace`;
+    ctx.font = `600 ${Math.max(9, R * 0.042)}px Orbitron, "JetBrains Mono", monospace`;
     ctx.fillStyle = rgba(C.p, 0.75); ctx.textAlign = 'center';
     const d = new Date();
     ctx.fillText(d.toLocaleTimeString('en-GB'), 0, -R * 0.94 + 2);
