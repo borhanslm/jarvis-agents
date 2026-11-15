@@ -158,6 +158,7 @@ async function ask(text) {
   handleReply(r);
 }
 function handleReply(r) {
+  if (r.brain) setNet(!r.brain.offline, r.brain.offline);
   if (r.say) addLog('jarvis', r.say);
   if (r.result) doResult(r.result);
   renderConfirm(r.confirm ? r.action : null);
@@ -211,7 +212,7 @@ function ui() {
   el.id = 'voiceDock'; el.className = 'voice-dock'; el.hidden = true;
   el.setAttribute('aria-label', 'دستیار صوتی');
   el.innerHTML = `<div class="vd-orb" id="vdOrb"><canvas id="vdWave" width="120" height="120"></canvas></div>
-    <div class="vd-main"><div class="vd-state" id="vdState"></div><div class="vd-hint" id="vdHint" dir="auto"></div>
+    <div class="vd-main"><div class="vd-state"><span id="vdState"></span><span class="vd-net" id="vdNet" hidden></span></div><div class="vd-hint" id="vdHint" dir="auto"></div>
       <div class="vd-confirm" id="vdConfirm" hidden></div></div>
     <div class="vd-acts"><button type="button" class="icon-btn" id="vdTalk" title="صحبت (Ctrl+Space)" aria-label="صحبت">${ic('mic')}</button>
       <button type="button" class="icon-btn" id="vdStop" title="قطع" aria-label="قطع">${ic('circle-stop')}</button>
@@ -234,6 +235,16 @@ function setState(s, hint) {
   if (s === 'idle' && settings().voiceWake === false) el.querySelector('#vdState').textContent = 'آماده — Ctrl+Space یا دکمه‌ی میکروفون';
   if (hint !== undefined) setHint(hint);
   const b = $('#btnVoice'); if (b) { b.classList.toggle('on', s !== 'off'); b.dataset.state = s; b.title = s === 'off' ? 'دستیار صوتی (خاموش)' : 'دستیار صوتی — ' + STATE_FA[s] + ' · میکروفون روشن است'; }
+}
+// online / offline badge on the dock
+const MODE_FA = { auto: 'خودکار', online: 'آنلاین', offline: 'آفلاین' };
+function setNet(online, brainOffline) {
+  const b = $('#vdNet'); if (!b) return;
+  const mode = settings().voiceMode || 'auto';
+  const off = mode === 'offline' || online === false || !!brainOffline;
+  b.hidden = false; b.dataset.net = off ? 'off' : 'on';
+  b.textContent = off ? 'آفلاین' : 'آنلاین';
+  b.title = 'حالت اتصال: ' + MODE_FA[mode] + (mode === 'auto' ? (off ? ' — الان اینترنت نیست، با اجزای محلی کار می‌کند' : ' — الان آنلاین') : '');
 }
 function setHint(t) { const h = $('#vdHint'); if (h) h.textContent = t || ''; }
 function renderConfirm(action) {
@@ -289,6 +300,7 @@ async function start(talkNow) {
     await startMic();
     const st = await api('/voice/status');
     V.localStt = st.stt.local; V.gpu = st.stt.gpu;
+    setNet(st.online, false);
     if (settings().voiceWake !== false && st.assets.wakeword.installed) await loadWakeWord();
     setState('idle', V.wwError ? 'تشخیص «هی جارویس» بار نشد: ' + V.wwError : !st.assets.wakeword.installed && settings().voiceWake !== false ? 'برای «هی جارویس» مدلش را از تنظیمات صدا دانلود کنید. فعلاً Ctrl+Space.' : '');
     if (talkNow) startRecording(false);
@@ -315,13 +327,27 @@ async function voiceDialog() {
       : x.downloading ? `<progress max="${x.total}" value="${x.got}"></progress><span class="help">${fa(Math.round(x.got / x.total * 100))}٪</span>`
       : `<button type="button" class="btn small" data-vdl="${id}">${ic('download', 'sm')}دانلود</button>${x.error ? `<span class="bad">${esc(x.error)}</span>` : ''}`}${extra}</div>`; };
   const opts = (list, v) => list.map(([k, l]) => `<option value="${esc(k)}" ${k === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  const ol = st.ollama || { models: [], suggested: [], pulls: {} };
+  const olModels = ol.models.map(x => [x.name, x.name + ' — ' + fa((x.size / 1e9).toFixed(1)) + ' گیگ']);
+  const olHtml = !ol.installed ? `<div class="va-tip">${ic('download', 'sm')} برای «مغز آفلاین»، برنامه‌ی رایگان Ollama را نصب کنید: <a href="${esc(ol.downloadUrl)}" target="_blank" rel="noopener" dir="ltr">ollama.com/download</a> — بعد این پنجره را دوباره باز کنید.</div>`
+    : `${!ol.running ? `<div class="help">Ollama نصب است ولی اجرا نشده. <button type="button" class="btn small" id="vOlStart">${ic('play', 'sm')}اجرای Ollama</button></div>` : ''}
+      <div class="va-list">${ol.suggested.map(x => { const have = ol.models.some(mm => mm.name === x.name); const p = ol.pulls[x.name];
+        return `<div class="va-row" data-olrow="${esc(x.name)}"><span dir="ltr">${esc(x.name)}</span><span class="help">${fa((x.size / 1e9).toFixed(1))} گیگ · ${esc(x.note)}</span>
+        ${have ? `<span class="ok">${ic('circle-check', 'sm')}نصب است</span>` : p && !p.done && !p.error ? `<progress max="${p.total || 1}" value="${p.completed || 0}"></progress><span class="help pct">${p.total ? fa(Math.round(p.completed / p.total * 100)) + '٪' : esc(p.status)}</span>`
+          : `<button type="button" class="btn small" data-olpull="${esc(x.name)}">${ic('download', 'sm')}دانلود</button>${p && p.error ? `<span class="bad">${esc(p.error)}</span>` : ''}`}</div>`; }).join('')}</div>`;
   const models = window.modelOptions ? window.modelOptions('claude', s.voiceModel).filter(([k]) => k && k !== '__custom') : [[s.voiceModel, s.voiceModel]];
   window.dialog(`<div class="dlg-scroll"><h3>${ic('mic')}دستیار صوتی</h3>
     <p class="help">${ic('lock', 'sm')} تا «هی جارویس» نگویید یا Ctrl+Space نزنید، هیچ صدایی ضبط یا جایی فرستاده نمی‌شود. تشخیص «هی جارویس» کاملاً روی همین کامپیوتر است.</p>
-    <div class="field-row"><div class="field"><label>میکروفون</label><select id="vMic">${opts([['', 'پیش‌فرض ویندوز'], ...mics.map(m => [m.deviceId, m.label || 'میکروفون'])], s.voiceMicId)}</select></div>
-      <div class="field"><label>مغز دستیار (مدل)</label><select id="vModel" dir="ltr">${opts(models, s.voiceModel)}</select></div></div>
-    <div class="field-row"><div class="field"><label>گفتار به متن</label><select id="vStt">${opts([['auto', 'خودکار (محلی اگر نصب باشد)'], ['local', 'محلی — whisper.cpp، رایگان و آفلاین'], ['api', 'API — OpenAI، دقیق و سریع']], s.voiceStt)}</select></div>
-      <div class="field"><label>متن به گفتار</label><select id="vTts">${opts([['auto', 'خودکار (محلی اگر نصب باشد)'], ['local', 'محلی — Piper، رایگان و آفلاین'], ['api', 'API — OpenAI']], s.voiceTts)}</select></div></div>
+    <h4>آنلاین یا آفلاین</h4>
+    <div class="field"><label>حالت اتصال</label><select id="vMode">${opts([['auto', 'خودکار — با اینترنت آنلاین، بدون اینترنت آفلاین (پیشنهادی)'], ['online', 'همیشه آنلاین — سریع‌تر و دقیق‌تر'], ['offline', 'همیشه آفلاین — هیچ چیز از این کامپیوتر بیرون نمی‌رود']], s.voiceMode || 'auto')}</select></div>
+    <div class="help">الان: ${s.voiceMode === 'offline' ? 'آفلاین' : st.online ? '<span class="ok">اینترنت وصل است</span>' : '<span class="bad">اینترنت در دسترس نیست</span>'}. «هی جارویس» همیشه آفلاین است.</div>
+    <div class="field-row"><div class="field"><label>مغز آنلاین</label><select id="vModel" dir="ltr">${opts(models, s.voiceModel)}</select></div>
+      <div class="field"><label>مغز آفلاین (Ollama)</label><select id="vModelOff" dir="ltr">${opts([['', olModels.length ? '— انتخاب کنید —' : '— هنوز مدلی نصب نیست —'], ...olModels], s.voiceModelOffline || '')}</select></div></div>
+    ${olHtml}
+    <h4>صدا</h4>
+    <div class="field-row"><div class="field"><label>میکروفون</label><select id="vMic">${opts([['', 'پیش‌فرض ویندوز'], ...mics.map(m => [m.deviceId, m.label || 'میکروفون'])], s.voiceMicId)}</select></div></div>
+    <div class="field-row"><div class="field"><label>گفتار به متن</label><select id="vStt">${opts([['auto', 'خودکار (محلی اگر نصب باشد)'], ['local', 'آفلاین — whisper.cpp، رایگان'], ['api', 'آنلاین — OpenAI، دقیق و سریع']], s.voiceStt)}</select></div>
+      <div class="field"><label>متن به گفتار</label><select id="vTts">${opts([['auto', 'خودکار (محلی اگر نصب باشد)'], ['local', 'آفلاین — Piper، رایگان'], ['api', 'آنلاین — OpenAI']], s.voiceTts)}</select></div></div>
     <div class="field-row"><div class="field"><label>صدای فارسی (محلی)</label><select id="vFa">${opts([['voice-fa-amir', 'امیر'], ['voice-fa-gyro', 'ژیرو']], s.voiceFaVoice)}</select></div>
       <div class="field"><label>صدای API</label><select id="vApiVoice" dir="ltr">${opts(['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'].map(x => [x, x]), s.voiceApiVoice)}</select></div></div>
     <div class="field"><label>زبان گفتار</label><select id="vLang">${opts([['auto', 'خودکار فارسی/انگلیسی (کمی کندتر)'], ['fa', 'فقط فارسی (سریع‌تر)'], ['en', 'فقط انگلیسی (سریع‌تر)']], s.voiceLang || 'auto')}</select></div>
@@ -339,6 +365,9 @@ async function voiceDialog() {
       <button type="button" class="btn ${V.state === 'off' ? '' : 'ghost'}" id="vToggle">${V.state === 'off' ? 'روشن کردن دستیار' : 'خاموش کردن دستیار'}</button>
       <button class="btn ghost" value="cancel">بستن</button></div>`, true);
   $('#dlgBody').onclick = async e => {
+    const olp = e.target.closest('[data-olpull]');
+    if (olp) { try { await api('/voice/ollama/pull', { body: { name: olp.dataset.olpull } }); olp.disabled = true; olp.textContent = 'در حال دانلود…'; } catch (err) { window.toast(err.message, true); } return; }
+    if (e.target.closest('#vOlStart')) { try { await api('/voice/ollama/start', { body: {} }); voiceDialog(); } catch (err) { window.toast(err.message, true); } return; }
     const dl = e.target.closest('[data-vdl]'), del = e.target.closest('[data-vdel]');
     if (dl) { try { await api('/voice/download', { body: { id: dl.dataset.vdl } }); dl.disabled = true; dl.textContent = 'در حال دانلود…'; } catch (err) { window.toast(err.message, true); } return; }
     if (del) { if (!confirm('حذف شود؟')) return; try { await api('/voice/assets/' + del.dataset.vdel, { method: 'DELETE' }); voiceDialog(); } catch (err) { window.toast(err.message, true); } return; }
@@ -347,16 +376,28 @@ async function voiceDialog() {
     if (e.target.closest('#vToggle')) { $('#dlg').close(); if (V.state === 'off') start(false); else stop(); }
   };
   async function save(close) {
-    const body = { voiceMicId: $('#vMic').value, voiceModel: $('#vModel').value, voiceStt: $('#vStt').value, voiceTts: $('#vTts').value, voiceFaVoice: $('#vFa').value,
+    const body = { voiceMode: $('#vMode').value, voiceModelOffline: $('#vModelOff').value, voiceMicId: $('#vMic').value, voiceModel: $('#vModel').value, voiceStt: $('#vStt').value, voiceTts: $('#vTts').value, voiceFaVoice: $('#vFa').value,
       voiceApiVoice: $('#vApiVoice').value, voiceLang: $('#vLang').value, voiceWake: $('#vWake').checked, voiceWakeThreshold: +$('#vThr').value, voiceSpeak: $('#vSpeak').checked };
     const micChanged = body.voiceMicId !== (settings().voiceMicId || '');
-    try { S.settings = await api('/settings', { body }); if (close) { $('#dlg').close(); window.toast('ذخیره شد'); } } catch (err) { window.toast(err.message, true); return; }
+    if (body.voiceMode === 'offline' && !body.voiceModelOffline) { window.toast('برای حالت آفلاین، یک «مغز آفلاین» انتخاب کنید (اول یکی از مدل‌ها را دانلود کنید).', true); return; }
+    try { S.settings = await api('/settings', { body }); setNet(body.voiceMode === 'offline' ? false : undefined); if (close) { $('#dlg').close(); window.toast('ذخیره شد'); } } catch (err) { window.toast(err.message, true); return; }
     if (micChanged && V.stream) { stopMic(); await startMic().catch(() => {}); }
     if (body.voiceWake && V.state !== 'off') { const st2 = await api('/voice/status'); V.localStt = st2.stt.local; if (st2.assets.wakeword.installed) await loadWakeWord(); }
   }
 }
 window.addEventListener('jarvis:ev', e => {
   const ev = e.detail;
+  if (ev.type === 'ollamaPull' && document.getElementById('vLog') && $('#dlg').open) {
+    if (ev.pull.done || ev.pull.error) { clearTimeout(window.__vdRefresh); window.__vdRefresh = setTimeout(voiceDialog, 400); return; }
+    const row = document.querySelector(`[data-olrow="${CSS.escape(ev.name)}"]`);
+    if (row) {
+      let pr = row.querySelector('progress');
+      if (!pr) { const b = row.querySelector('[data-olpull]'); if (b) b.remove(); pr = document.createElement('progress'); const sp = document.createElement('span'); sp.className = 'help pct'; row.append(pr, sp); }
+      pr.max = ev.pull.total || 1; pr.value = ev.pull.completed || 0;
+      row.querySelector('.pct').textContent = ev.pull.total ? fa(Math.round(ev.pull.completed / ev.pull.total * 100)) + '٪' : ev.pull.status;
+    }
+    return;
+  }
   if (ev.type === 'voiceAssets' && document.getElementById('vLog') && $('#dlg').open) {
     for (const [id, x] of Object.entries(ev.assets || {})) {
       const row = document.querySelector(`[data-vdl="${id}"]`)?.closest('.va-row') || document.querySelector(`.va-row progress`)?.closest('.va-row');

@@ -87,7 +87,19 @@ const { Speech } = require('./lib/voice/speech');
 // OpenAI-compatible connection used for API speech (the first OpenAI connection that has a key)
 const openaiTarget = () => { const p = providers.view().find(x => x.kind === 'openai' && x.hasKey && /api\.openai\.com/.test(x.baseUrl)); return p ? { baseUrl: p.baseUrl, key: providers.key(p.id) } : null; };
 const speech = new Speech({ assets: voiceAssets, apiTarget: openaiTarget });
-const llmDeps = () => ({ providers, anthropicKey: setup.secrets.get('anthropicApiKey') });
+const net = require('./lib/net');
+const { Ollama } = require('./lib/ollama');
+const ollama = new Ollama({ onProgress: (name, st) => broadcast({ type: 'ollamaPull', name, pull: st }) });
+const llmDeps = () => ({ providers, anthropicKey: setup.secrets.get('anthropicApiKey'), ollamaBase: ollama.base });
+// Voice connection mode: 'offline' never sends anything out; 'online' always uses online services;
+// 'auto' uses them while the internet is reachable and switches to the local ones when it is not.
+async function voiceOnline(s) {
+  const mode = s.voiceMode || 'auto';
+  if (mode === 'offline') return false;
+  if (mode === 'online') return true;
+  return net.online();
+}
+const offlineSpec = s => (s.voiceModelOffline ? 'ollama:' + s.voiceModelOffline : null);
 const { Brain } = require('./lib/voice/brain');
 // an NVIDIA card makes local speech recognition ~20x faster (checked once)
 let _gpu;
@@ -111,7 +123,7 @@ const voiceContext = () => {
     tasks: tasks.today().slice(0, 25),
   };
 };
-const brain = new Brain({ chat: opts => llm.chat({ ...opts, deps: llmDeps() }), context: voiceContext });
+const brain = new Brain({ chat: async opts => { if (/^ollama:/.test(opts.spec || '')) await ollama.ensureRunning(); return llm.chat({ ...opts, deps: llmDeps() }); }, context: voiceContext });
 const voiceLog = [];
 const findByName = (list, name, key = 'name') => { const n = String(name || '').trim().toLowerCase(); if (!n) return null; return list.find(x => String(x[key]).toLowerCase() === n) || list.find(x => String(x[key]).toLowerCase().includes(n) || n.includes(String(x[key]).toLowerCase())) || null; };
 // Carry out the action the brain chose. Returns what happened (shown and spoken by the panel).
@@ -541,7 +553,7 @@ async function api(req, res, url) {
   if (parts[0] === 'voice') {
     try {
       const s = store.settings();
-      if (parts[1] === 'status' && m === 'GET') return send(res, 200, { assets: voiceAssets.status(), stt: { local: speech.whisper.ready(), api: speech.apiStt.ready(), gpu: speech.whisper.gpu() }, nvidia: nvidiaGpu(), tts: { local: speech.piper.ready('fa'), api: speech.apiTts.ready() }, log: voiceLog.slice(-60) });
+      if (parts[1] === 'status' && m === 'GET') return send(res, 200, { mode: s.voiceMode || 'auto', online: s.voiceMode === 'offline' ? null : await net.online(), ollama: await ollama.status(), assets: voiceAssets.status(), stt: { local: speech.whisper.ready(), api: speech.apiStt.ready(), gpu: speech.whisper.gpu() }, nvidia: nvidiaGpu(), tts: { local: speech.piper.ready('fa'), api: speech.apiTts.ready() }, log: voiceLog.slice(-60) });
       if (parts[1] === 'download' && m === 'POST') return send(res, 200, voiceAssets.download(String(body.id || '')));
       if (parts[1] === 'assets' && parts[2] && m === 'DELETE') { if (parts[2].startsWith('whisper')) speech.stop(); voiceAssets.remove(parts[2]); broadcast({ type: 'voiceAssets', assets: voiceAssets.status() }); return send(res, 200, { ok: true }); }
       // wake-word model files for the panel (only these three names)
@@ -555,15 +567,27 @@ async function api(req, res, url) {
         const wav = Buffer.from(String(body.audio || ''), 'base64');
         if (wav.length < 1000) return send(res, 400, { error: 'صدایی ضبط نشد' });
         // the panel's Persian wake-word check may only ever use the local engine
-        return send(res, 200, await speech.transcribe(wav, { engine: body.engine === 'local' ? 'local' : s.voiceStt, lang: ['fa', 'en'].includes(body.lang) ? body.lang : s.voiceLang }));
+        const offline = body.engine === 'local' || !(await voiceOnline(s));
+        return send(res, 200, await speech.transcribe(wav, { engine: body.engine === 'local' ? 'local' : s.voiceStt, offline, lang: ['fa', 'en'].includes(body.lang) ? body.lang : s.voiceLang }));
       }
       if (parts[1] === 'tts' && m === 'POST') {
-        const r = await speech.speak(String(body.text || '').slice(0, 2000), { engine: s.voiceTts, prefs: { faVoice: s.voiceFaVoice, apiVoice: s.voiceApiVoice } });
+        const r = await speech.speak(String(body.text || '').slice(0, 2000), { engine: s.voiceTts, offline: !(await voiceOnline(s)), prefs: { faVoice: s.voiceFaVoice, apiVoice: s.voiceApiVoice } });
         return send(res, 200, { audio: r.wav.toString('base64'), ms: r.ms, engine: r.engine });
       }
       if (parts[1] === 'ask' && m === 'POST') {
         const text = String(body.text || '').trim().slice(0, 2000);
-        const r = await brain.handle(text, { spec: s.voiceModel || 'claude-haiku-5-5' });
+        const on = await voiceOnline(s);
+        const off = offlineSpec(s);
+        let spec = on ? (s.voiceModel || 'claude-haiku-5-5') : off;
+        if (!spec) throw new Error('اینترنت در دسترس نیست و مغز آفلاین انتخاب نشده. در تنظیمات صدا یک مدل Ollama انتخاب کنید.');
+        let r;
+        try { r = await brain.handle(text, { spec }); }
+        catch (e) {
+          // the online model could not be reached: answer with the offline one (not when the user chose "online only")
+          if (!on || s.voiceMode === 'online' || !off || !net.isNetError(e)) throw e;
+          net.markOffline(); spec = off; r = await brain.handle(text, { spec });
+        }
+        r.brain = { spec, offline: spec === off };
         const result = r.confirm ? null : await voiceAct(r.action);
         voiceLog.push({ ts: Date.now(), user: text, say: r.say, action: r.action, confirm: r.confirm, result });
         if (voiceLog.length > 200) voiceLog.splice(0, voiceLog.length - 200);
@@ -576,6 +600,10 @@ async function api(req, res, url) {
         return send(res, 200, { action: a, result });
       }
       if (parts[1] === 'reset' && m === 'POST') { brain.reset(); return send(res, 200, { ok: true }); }
+      // offline brain (Ollama): start it, download a model (only on the user's click)
+      if (parts[1] === 'ollama' && parts[2] === 'start' && m === 'POST') { await ollama.ensureRunning(); return send(res, 200, await ollama.status()); }
+      if (parts[1] === 'ollama' && parts[2] === 'pull' && m === 'POST') return send(res, 200, ollama.pull(String(body.name || '')));
+      if (parts[1] === 'net' && m === 'GET') return send(res, 200, { online: await net.online({ force: true }) });
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
   if (parts[0] === 'connectors') {

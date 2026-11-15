@@ -141,3 +141,9 @@
 .ops-labels > * { left: 0; top: 0; }
 .ops-label { direction: rtl; }
 .va-tip { padding: var(--p-space-2) var(--p-space-3); border-radius: var(--p-radius-md); background: var(--color-primary-soft); border: 1px solid var(--color-primary-line); font-size: var(--text-sm); }
+
+/* voice: online/offline badge */
+.voice-dock .vd-state { display: flex; align-items: center; gap: 8px; }
+.vd-net { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line, #8884); color: var(--muted, #aaa); font-weight: 500; }
+.vd-net[data-net="on"] { color: #3ecf8e; border-color: #3ecf8e66; }
+.vd-net[data-net="off"] { color: #f0b429; border-color: #f0b42966; }
