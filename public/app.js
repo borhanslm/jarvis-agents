@@ -1367,7 +1367,7 @@ function modelOptions(kind, value) {
   const base = claudeModels(); // both slots can run Claude models
   const def = kind === 'claude' ? 'پیش‌فرض CLI' : `پیش‌فرض · ${prettyModel(S.codexDefaultModel) || 'CLI'}`;
   const extra = [...cm[kind], value].filter(v => v && v !== '__custom' && !base.some(([i]) => i === v));
-  const conn = (S.providers || []).flatMap(p => p.models.map(m => [`p:${p.id}:${m}`, `${p.name} · ${m}`]));
+  const conn = (S.providers || []).filter(p => p.kind !== 'chat').flatMap(p => p.models.map(m => [`p:${p.id}:${m}`, `${p.name} · ${m}`]));
   const extra2 = extra.filter(v => !conn.some(([c]) => c === v));
   return [['', def], ...base, ...conn, ...[...new Set(extra2)].map(v => [v, prettyModel(v) === v ? v : /^p:/.test(v) ? `${prettyModel(v)} (حذف‌شده)` : `${prettyModel(v)} (${v})`]), ['__custom', 'سفارشی…']];
 }
@@ -1917,7 +1917,7 @@ function providersBlock() {
   const list = S.providers || [];
   const rows = list.map(p => `<div class="prov-row">
       <span class="dot ${p.hasKey ? 'on' : 'warn'}"></span><b>${esc(p.name)}</b>
-      <span class="help">${p.kind === 'openai' ? 'OpenAI Responses · موتور Codex' : 'سازگار با Anthropic · موتور Claude Code'} · ${fa(p.models.length)} مدل${p.hasKey ? '' : ' · <span class="pi-warn">کلید ندارد</span>'}</span>
+      <span class="help">${p.kind === 'chat' ? 'فقط چت، صدا و تلگرام' : p.kind === 'openai' ? 'OpenAI Responses · موتور Codex' : 'سازگار با Anthropic · موتور Claude Code'} · ${fa(p.models.length)} مدل${p.hasKey ? '' : ' · <span class="pi-warn">کلید ندارد</span>'}</span>
       <button type="button" class="btn small ghost" data-editprov="${esc(p.id)}">${ic('pencil', 'sm')}ویرایش</button></div>`).join('');
   return `<div class="wz-item ${list.some(p => p.hasKey) ? 'ok' : ''}">
     <div class="wz-icon">${ic('globe')}</div>
@@ -1940,6 +1940,7 @@ async function providerDialog(id) {
     <div class="field"><label>نوع API</label>
       <label class="check"><input type="radio" name="pvKind" value="anthropic" ${v.kind !== 'openai' ? 'checked' : ''}> سازگار با Anthropic — با موتور Claude Code اجرا می‌شود (DeepSeek، Kimi، GLM، MiniMax)</label>
       <label class="check"><input type="radio" name="pvKind" value="openai" ${v.kind === 'openai' ? 'checked' : ''}> سازگار با OpenAI Responses — با موتور Codex اجرا می‌شود (OpenAI)</label>
+      <label class="check"><input type="radio" name="pvKind" value="chat" ${v.kind === 'chat' ? 'checked' : ''}> سازگار با OpenAI Chat — فقط برای چت، صدا و تلگرام (Gemini، Grok، OpenRouter، Groq، NVIDIA، Ollama)</label>
       <div class="help" id="pvKindHelp"></div></div>
     <div class="field"><label for="pvUrl">آدرس API (Base URL)</label><input id="pvUrl" dir="ltr" value="${esc(v.baseUrl)}" placeholder="https://api.example.com/anthropic"></div>
     <div class="field"><label for="pvKey">کلید API <a href="#" id="pvKeyLink" hidden>گرفتن کلید ↗</a></label>
@@ -1960,7 +1961,7 @@ async function providerDialog(id) {
   const preset = () => presets.find(x => x.id === (p ? p.preset : $('#pvPreset').value)) || {};
   const kind = () => (document.querySelector('input[name=pvKind]:checked') || {}).value || 'anthropic';
   const syncHelp = () => {
-    $('#pvKindHelp').textContent = kind() === 'openai'
+    $('#pvKindHelp').textContent = kind() === 'chat' ? 'برای گفتگو و دستیار. تیم کدنویسی از این نوع استفاده نمی‌کند.' : kind() === 'openai'
       ? 'فقط سرویس‌هایی که Responses API دارند. سرویس‌هایی که فقط Chat Completions دارند (مثل DeepSeek) از این راه کار نمی‌کنند؛ برای آن‌ها نوع Anthropic را انتخاب کنید.'
       : 'سرویس باید API سازگار با Anthropic (/v1/messages) داشته باشد. DeepSeek، Kimi، GLM و MiniMax چنین آدرسی دارند.';
     const pr = preset(); const l = $('#pvKeyLink');
@@ -2001,20 +2002,22 @@ async function providerDialog(id) {
       out(r.ok ? `${ic('circle-check', 'sm')} اتصال برقرار است (${fa(r.ms)} میلی‌ثانیه).` : `${ic('circle-x', 'sm')} ${esc(r.hint || '')} <span dir="ltr">${esc(r.status ? r.status + ' — ' : '')}${esc(r.error || '')}</span>`, !r.ok);
     } catch (e) { out(esc(e.message), true); }
   };
+  // opened from AI Core: go back there instead of the setup wizard
+  const pvDone = () => { const f = window.__pvReturn; window.__pvReturn = null; if (f) { $('#dlg').close(); f(); } else setupDialog(); };
   $('#pvSave').onclick = async () => {
     try {
       const r = await api('/providers', { body: form() });
       S.providers = await api('/providers');
       toast(`اتصال «${r.name}» ذخیره شد${r.hasKey ? '' : ' — کلید API را هم وارد کنید'}`);
       renderAgents(); renderModelBar();
-      setupDialog();
+      pvDone();
     } catch (e) { out(esc(e.message), true); }
   };
   if ($('#pvDel')) $('#pvDel').onclick = async () => {
     if (!confirm(`اتصال «${p.name}» و کلیدش حذف شود؟`)) return;
-    try { await api('/providers/' + p.id, { method: 'DELETE' }); S.providers = await api('/providers'); toast('حذف شد'); renderAgents(); renderModelBar(); setupDialog(); } catch (e) { toast(e.message, true); }
+    try { await api('/providers/' + p.id, { method: 'DELETE' }); S.providers = await api('/providers'); toast('حذف شد'); renderAgents(); renderModelBar(); pvDone(); } catch (e) { toast(e.message, true); }
   };
-  $('#pvBack').onclick = () => setupDialog();
+  $('#pvBack').onclick = () => pvDone();
 }
 
 // ---------- sub-agents: who runs each one ----------

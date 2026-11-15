@@ -15,6 +15,7 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } ca
 const SECTIONS = [
   { id: 'cc', icon: 'radar', label: 'مرکز فرمان', go: () => show('cc') },
   { id: 'code', icon: 'code', label: 'تیم کدنویسی', go: () => show('code') },
+  // full-page sections from other modules (AI Core, Chat, …) are inserted here — see registerView
   { id: 'tasks', icon: 'list-checks', label: 'تسک‌ها', go: () => tasksDialog() },
   { id: 'voice', icon: 'mic', label: 'دستیار صوتی', go: () => window.voiceDialog && window.voiceDialog() },
   { id: 'ops', icon: 'activity', label: 'اتاق عملیات', go: () => window.openOps && window.openOps() },
@@ -23,7 +24,12 @@ const SECTIONS = [
   { id: 'settings', icon: 'settings', label: 'تنظیمات', go: () => $('#btnSettings') && $('#btnSettings').click() },
 ];
 
+// Other modules add full-page sections: registerView(id, { icon, label, enter(el), leave() })
+const VIEWS = window.JARVIS_VIEWS || (window.JARVIS_VIEWS = {});
+window.registerView = (id, def) => { VIEWS[id] = def; };
 function buildRail() {
+  const extra = Object.entries(VIEWS).map(([id, v]) => ({ id, icon: v.icon, label: v.label, go: () => show(id) }));
+  SECTIONS.splice(2, 0, ...extra);
   const layout = $('.layout');
   if (!layout || $('#rail')) return;
   const nav = document.createElement('nav');
@@ -33,14 +39,24 @@ function buildRail() {
   layout.prepend(nav);
   document.body.classList.add('has-rail');
   const view = document.createElement('section');
-  view.id = 'ccView'; view.className = 'cc-view'; view.setAttribute('aria-label', 'مرکز فرمان');
+  view.id = 'ccView'; view.className = 'cc-view page-view'; view.setAttribute('aria-label', 'مرکز فرمان');
   layout.append(view);
+  for (const [id, v] of Object.entries(VIEWS)) {
+    const el = document.createElement('section');
+    el.id = 'view-' + id; el.className = 'page-view ' + (v.className || ''); el.setAttribute('aria-label', v.label);
+    layout.append(el); v.el = el;
+  }
 }
 
 let current = null;
 function show(id) {
+  if (id !== 'cc' && id !== 'code' && !VIEWS[id]) id = 'cc';
+  const prev = current;
   current = id;
-  document.body.classList.toggle('cc-on', id === 'cc');
+  if (prev && prev !== id && VIEWS[prev] && VIEWS[prev].leave) VIEWS[prev].leave();
+  document.body.classList.toggle('cc-on', id !== 'code');
+  document.querySelectorAll('.page-view').forEach(el => el.classList.toggle('on', el.id === (id === 'cc' ? 'ccView' : 'view-' + id)));
+  if (VIEWS[id]) VIEWS[id].enter(VIEWS[id].el);
   document.querySelectorAll('.rail-btn').forEach(b => b.classList.toggle('on', b.dataset.sec === id));
   lsSet('jarvis.view', id);
   if (id === 'cc') { renderShell(); refresh(); startTimers(); core && core.resume(); }
@@ -296,9 +312,10 @@ function makeCore(host) {
 function boot() {
   buildRail();
   const v = lsGet('jarvis.view', 'cc');
-  show(v === 'code' ? 'code' : 'cc');
+  show(v);
   // opening a chat / project from anywhere switches to the code view
-  document.addEventListener('click', e => { if (current === 'cc' && e.target.closest('#chatList li, #projectList li, #btnNewChat')) show('code'); }, true);
+  document.addEventListener('click', e => { if (current !== 'code' && e.target.closest('#chatList li, #projectList li, #btnNewChat')) show('code'); }, true);
   const brand = $('#brand'); if (brand) brand.addEventListener('click', () => show('cc'));
 }
-if (window.api) boot(); else window.addEventListener('load', boot);
+// after every module script ran (so their sections are registered)
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else setTimeout(boot);

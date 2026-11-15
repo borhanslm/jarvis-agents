@@ -4,8 +4,8 @@
 .layout { grid-template-columns: 64px var(--sidebar-width) minmax(0, 1fr); }
 body.cc-on .layout { grid-template-columns: 64px minmax(0, 1fr); }
 body.cc-on .layout > .sidebar, body.cc-on .layout > .main { display: none; }
-.cc-view { display: none; }
-body.cc-on .cc-view { display: block; }
+.page-view { display: none; min-height: 0; }
+body.cc-on .page-view.on { display: block; }
 
 .rail { display: flex; flex-direction: column; gap: 4px; padding: 10px 8px; border-inline-end: 1px solid var(--color-border-subtle); background: var(--color-surface-1); overflow-y: auto; }
 .rail-btn { position: relative; display: grid; place-items: center; width: 48px; height: 44px; border: 1px solid transparent; border-radius: 12px; background: none; color: var(--color-fg-muted); cursor: pointer; transition: background .15s, color .15s, border-color .15s; }

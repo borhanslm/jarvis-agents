@@ -101,6 +101,26 @@ async function voiceOnline(s) {
   return net.online();
 }
 const offlineSpec = s => (s.voiceModelOffline ? 'ollama:' + s.voiceModelOffline : null);
+const isLocalSpec = spec => /^ollama:/.test(spec || '') || (() => { const m = /^p:([a-z0-9-]+):/.exec(spec || ''); const p = m && providers.get(m[1]); return !!(p && /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])/.test(p.baseUrl)); })();
+// Any language model, for chat / voice / Telegram (starts Ollama when needed)
+const chatLLM = async opts => { if (/^ollama:/.test(opts.spec || '')) await ollama.ensureRunning(); return llm.chat({ ...opts, deps: llmDeps() }); };
+// Every model the panel can chat with: Claude, saved connections, local Ollama models.
+async function chatModels() {
+  const viaKey = !!setup.secrets.get('anthropicApiKey');
+  const out = require('./lib/models').CLAUDE.map(m => ({ spec: m.id, name: m.name, group: 'Claude', note: viaKey ? 'کلید API' : 'Claude Code', ok: true, local: false }));
+  for (const p of providers.view()) for (const m of p.models) { const local = isLocalSpec('p:' + p.id + ':' + m); out.push({ spec: 'p:' + p.id + ':' + m, name: m, group: p.name, note: p.hasKey || local ? '' : 'کلید ندارد', ok: p.hasKey || local, local }); }
+  const ol = await ollama.status();
+  for (const m of ol.models) out.push({ spec: 'ollama:' + m.name, name: m.name, group: 'Ollama (آفلاین)', note: (m.size / 1e9).toFixed(1) + ' GB', ok: true, local: true });
+  return out;
+}
+const { Talks } = require('./lib/talks');
+const talks = new Talks(DATA, { chat: chatLLM, onEvent: ev => broadcast(ev) });
+// No internet + an online model chosen: answer with the offline model (mode "auto" only)
+async function talkSpec(spec) {
+  const s = store.settings();
+  if (isLocalSpec(spec) || s.voiceMode === 'online' || !s.voiceModelOffline) return spec;
+  return (await net.online()) ? spec : 'ollama:' + s.voiceModelOffline;
+}
 const { Brain } = require('./lib/voice/brain');
 // an NVIDIA card makes local speech recognition ~20x faster (checked once)
 let _gpu;
@@ -127,7 +147,7 @@ const voiceContext = () => {
     tasks: tasks.today().slice(0, 25),
   };
 };
-const brain = new Brain({ chat: async opts => { if (/^ollama:/.test(opts.spec || '')) await ollama.ensureRunning(); return llm.chat({ ...opts, deps: llmDeps() }); }, context: voiceContext });
+const brain = new Brain({ chat: chatLLM, context: voiceContext });
 const voiceLog = [];
 const findByName = (list, name, key = 'name') => { const n = String(name || '').trim().toLowerCase(); if (!n) return null; return list.find(x => String(x[key]).toLowerCase() === n) || list.find(x => String(x[key]).toLowerCase().includes(n) || n.includes(String(x[key]).toLowerCase())) || null; };
 // Carry out the action the brain chose. Returns what happened (shown and spoken by the panel).
@@ -554,6 +574,32 @@ async function api(req, res, url) {
       if (parts[1] && m === 'DELETE') { tasks.remove(parts[1]); return send(res, 200, { ok: true }); }
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
+  // ---- plain chat (any model) and the model list for it ----
+  if (parts[0] === 'llms' && m === 'GET') { try { return send(res, 200, await chatModels()); } catch (e) { return send(res, 400, { error: e.message }); } }
+  if (parts[0] === 'llms' && parts[1] === 'test' && m === 'POST') {
+    const t0 = Date.now();
+    try { const r = await chatLLM({ spec: String(body.spec || ''), messages: [{ role: 'user', content: 'Reply with exactly: ok' }], maxTokens: 16, signal: AbortSignal.timeout(60000) }); return send(res, 200, { ok: true, ms: Date.now() - t0, text: String(r.text || '').slice(0, 80) }); }
+    catch (e) { return send(res, 200, { ok: false, error: e.name === 'TimeoutError' ? 'جواب نداد (بیش از ۶۰ ثانیه)' : e.message }); }
+  }
+  if (parts[0] === 'talks') {
+    try {
+      const id = parts[1];
+      if (!id && m === 'GET') return send(res, 200, url.searchParams.get('q') ? talks.search(url.searchParams.get('q')) : talks.all());
+      if (!id && m === 'POST') { const t = talks.create(body || {}); broadcast({ type: 'talk', talk: talks.summary(t) }); return send(res, 200, t); }
+      const t = talks.get(id);
+      if (!t) return send(res, 404, { error: 'گفتگو پیدا نشد' });
+      if (!parts[2] && m === 'GET') return send(res, 200, { ...t, running: talks.running.has(id) });
+      if (!parts[2] && m === 'POST') { talks.update(id, body || {}); broadcast({ type: 'talk', talk: talks.summary(t) }); return send(res, 200, talks.summary(t)); }
+      if (!parts[2] && m === 'DELETE') { talks.remove(id); broadcast({ type: 'talkRemoved', id }); return send(res, 200, { ok: true }); }
+      if ((parts[2] === 'send' || parts[2] === 'regenerate') && m === 'POST') {
+        // answer streams over the event channel; this request returns at once
+        talks.send(id, { text: body.text, model: body.model, regenerate: parts[2] === 'regenerate', resolveSpec: talkSpec }).catch(e => broadcast({ type: 'talkDone', id, message: { role: 'assistant', error: e.message } }));
+        return send(res, 200, { ok: true });
+      }
+      if (parts[2] === 'stop' && m === 'POST') { talks.stop(id); return send(res, 200, { ok: true }); }
+      if (parts[2] === 'export' && m === 'GET') { res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(talks.markdown(id)); }
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
   // ---- Command Center: real system, network, weather, agents, models and tasks ----
   if (parts[0] === 'cc') {
     try {
@@ -948,6 +994,8 @@ function stopAll() {
   for (const id of [...orch.running.keys()]) orch.stop(id);
   for (const id of [...previews.keys()]) stopPreview(id);
   speech.stop(); // the resident whisper server
+  for (const id of [...talks.running.keys()]) talks.stop(id);
+  talks.flush();
   store.flush();
 }
 if (require.main === module) {
