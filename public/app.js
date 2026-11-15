@@ -1999,7 +1999,9 @@ async function providerDialog(id) {
     catch (e) { out(esc(e.message), true); }
   };
   $('#pvTest').onclick = async () => {
-    const f = form(); const model = String(f.models).split(/[,،\n]/)[0].trim();
+    const f = form();
+    const all = String(f.models).split(/[,،\n]/).map(x => x.trim().replace(/^models\//, '')).filter(Boolean);
+    const model = all.find(x => !/tts|embed|imagen|veo|image|aqa|whisper|audio/i.test(x)) || all[0]; // test with a chat model
     if (!model) return out('اول یک مدل بنویسید.', true);
     out(`در حال آزمایش با <code dir="ltr">${esc(model)}</code>…`);
     try {

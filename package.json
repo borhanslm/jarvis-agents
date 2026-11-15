@@ -43,7 +43,8 @@
       "package.json",
       "lib/**/*",
       "desktop/**/*",
-      "public/**/*"
+      "public/**/*",
+      "club/worker.js"
     ],
     "asarUnpack": [
       "review-schema.json"
