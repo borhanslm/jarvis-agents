@@ -1,4 +1,7 @@
 // Smart-mode plan card, connectors (MCP) & plugins, task queue, cost estimate.
+// SVG icons for the connector catalog (no emoji as icons)
+const EXT_IC = { playwright: 'globe', context7: 'book-open', github: 'git-branch', memory: 'brain', thinking: 'sparkles', postgres: 'database', brave: 'search' };
+const extIc = c => ic(EXT_IC[c.key] || EXT_IC[c.id] || 'plug');
 // Loaded after app.js and uses its helpers ($, S, api, dialog, esc, ic, toast, fa, …).
 'use strict';
 
@@ -93,7 +96,7 @@ function connectorsHtml() {
     const missing = (c.secrets || []).some(s => !s.set);
     return `<div class="ext-row ${c.enabled ? '' : 'off'}">
       <label class="switch" title="فعال/غیرفعال"><input type="checkbox" data-cntoggle="${esc(c.id)}" ${c.enabled ? 'checked' : ''}><span></span></label>
-      <span class="ext-ic">${esc(c.icon || '🔌')}</span>
+      <span class="ext-ic">${extIc(c)}</span>
       <div class="ext-main"><b dir="auto">${esc(c.name)}</b>${c.plugin ? '<span class="pill">از پلاگین</span>' : ''}
         <div class="help" dir="auto">${esc(c.desc || '')}</div><code class="cn-cmd" dir="ltr">${esc(c.type === 'http' ? c.url : [c.command, ...(c.args || [])].join(' '))}</code>
         <div class="ext-roles">${Object.keys(ROLE_FA).map(r => `<span class="role ${c.roles && c.roles[r] ? 'on' : ''}">${ROLE_FA[r]}</span>`).join('')}
@@ -103,11 +106,11 @@ function connectorsHtml() {
         <button type="button" class="btn small ghost" data-cnedit="${esc(c.id)}">${ic('pencil', 'sm')}ویرایش</button></div></div>`;
   }).join('') : '<div class="help empty-note">هنوز اتصال‌دهنده‌ای ندارید. از فهرست زیر یکی اضافه کنید — بعد ایجنت‌ها می‌توانند از ابزارهایش استفاده کنند.</div>';
   const cat = (S.connectorCatalog || []).map(c => `<button type="button" class="cat-card ${have.has(c.key) ? 'added' : ''}" data-cnadd="${esc(c.key)}" ${have.has(c.key) ? 'disabled' : ''}>
-      <span class="ext-ic">${esc(c.icon)}</span><b>${esc(c.name)}</b><span class="help">${esc(c.desc)}</span>${have.has(c.key) ? '<em>اضافه شد</em>' : ''}</button>`).join('');
+      <span class="ext-ic">${extIc(c)}</span><b>${esc(c.name)}</b><span class="help">${esc(c.desc)}</span>${have.has(c.key) ? '<em>اضافه شد</em>' : ''}</button>`).join('');
   return `<p class="help">${ic('info', 'sm')} اتصال‌دهنده‌ها همان سرورهای MCP هستند که Claude Code هم استفاده می‌کند. هر کدام را می‌توانید فقط به سازنده، تستر یا ساب‌ایجنت‌ها بدهید؛ روی همه‌ی موتورها (Claude، Codex و اتصال‌هایی مثل DeepSeek) کار می‌کند.</p>
     <div class="ext-list">${rows}</div>
     <h4>افزودن</h4><div class="cat-grid">${cat}
-      <button type="button" class="cat-card custom" data-cnadd=""><span class="ext-ic">➕</span><b>اتصال‌دهنده‌ی دلخواه</b><span class="help">هر سرور MCP: یک فرمان (مثل npx …) یا یک آدرس https</span></button></div>`;
+      <button type="button" class="cat-card custom" data-cnadd=""><span class="ext-ic">${ic('plus')}</span><b>اتصال‌دهنده‌ی دلخواه</b><span class="help">هر سرور MCP: یک فرمان (مثل npx …) یا یک آدرس https</span></button></div>`;
 }
 
 function connectorForm(c) {
@@ -146,7 +149,7 @@ function pluginsHtml() {
   const list = S.plugins || [];
   const rows = list.length ? list.map(p => `<div class="ext-row ${p.enabled ? '' : 'off'}">
       <label class="switch" title="فعال/غیرفعال"><input type="checkbox" data-pltoggle="${esc(p.id)}" ${p.enabled ? 'checked' : ''}><span></span></label>
-      <span class="ext-ic">🧩</span>
+      <span class="ext-ic">${ic('puzzle')}</span>
       <div class="ext-main"><b dir="ltr">${esc(p.name)}</b>${p.version ? `<span class="pill" dir="ltr">v${esc(p.version)}</span>` : ''}
         <div class="help" dir="auto">${esc(p.description || '')}</div>
         <div class="ext-roles">${p.subagents.length ? `<span class="role on">${fa(p.subagents.length)} ایجنت</span>` : ''}${p.skills.length ? `<span class="role on">${fa(p.skills.length)} اسکیل</span>` : ''}${(p.commands || []).length ? `<span class="role on">${fa(p.commands.length)} فرمان</span>` : ''}${p.connectors.length ? `<span class="role on">${fa(p.connectors.length)} اتصال‌دهنده</span>` : ''}

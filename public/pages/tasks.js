@@ -87,7 +87,7 @@ function render() {
 const REP_FA = Object.fromEntries(REPEAT);
 function row(t) {
   const when = t.due ? new Date(t.due).toLocaleString('fa-IR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
-  const meta = [when, t.repeat ? '🔁 ' + REP_FA[t.repeat] : '', t.due && t.remindBefore ? '🔔 ' + (REMIND.find(([k]) => k === t.remindBefore) || [0, t.remindBefore + ' دقیقه قبل'])[1] : '', t.snoozeUntil && t.snoozeUntil > Date.now() ? '⏰ تا ' + new Date(t.snoozeUntil).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '', t.source === 'voice' ? 'با صدا' : '', t.chatId ? 'به تیم داده شد' : ''].filter(Boolean).join(' · ');
+  const meta = [when, t.repeat ? 'تکرار: ' + REP_FA[t.repeat] : '', t.due && t.remindBefore ? 'یادآوری: ' + (REMIND.find(([k]) => k === t.remindBefore) || [0, t.remindBefore + ' دقیقه قبل'])[1] : '', t.snoozeUntil && t.snoozeUntil > Date.now() ? 'به تعویق تا ' + new Date(t.snoozeUntil).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '', t.source === 'voice' ? 'با صدا' : '', t.chatId ? 'به تیم داده شد' : ''].filter(Boolean).join(' · ');
   return `<li class="tq-item ${t.done ? 'done' : ''} ${t.priority === 'high' ? 'hi' : ''}" data-id="${esc(t.id)}">
     <button type="button" class="cc-check ${t.done ? 'on' : ''}" data-act="done" aria-label="${t.done ? 'برگرداندن' : 'انجام شد'}" title="${t.done ? 'برگرداندن' : 'انجام شد'}"></button>
     <div class="tq-body"><b dir="auto">${esc(t.title)}</b>${t.notes ? `<div class="help" dir="auto">${esc(t.notes).slice(0, 160)}</div>` : ''}<div class="tq-meta">${esc(meta)}</div></div>

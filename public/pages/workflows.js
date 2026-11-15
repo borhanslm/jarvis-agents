@@ -156,7 +156,7 @@ function onUp(e) {
 }
 function summary(n) {
   const c = n.config || {};
-  return ({ llm: c.prompt, agent: c.task, ask: c.question, approve: c.question, condition: c.op === 'ai' ? '🤖 ' + (c.arg || '') : (c.op || 'contains') + ' «' + (c.arg || '') + '»', task: c.title, notify: c.text, http: c.url, delay: c.minutes ? faN(c.minutes) + ' دقیقه' : '' }[n.type] || '').slice(0, 60);
+  return ({ llm: c.prompt, agent: c.task, ask: c.question, approve: c.question, condition: c.op === 'ai' ? 'هوش مصنوعی: ' + (c.arg || '') : (c.op || 'contains') + ' «' + (c.arg || '') + '»', task: c.title, notify: c.text, http: c.url, delay: c.minutes ? faN(c.minutes) + ' دقیقه' : '' }[n.type] || '').slice(0, 60);
 }
 
 // ---- properties of the selected node ----
