@@ -173,6 +173,7 @@ const bot = new Bot({
   ask: async text => { const r = await brainAsk(botBrain, text); const result = r.confirm ? null : await voiceAct(r.action); return { ...r, result }; },
   confirm: async yes => { const a = botBrain.confirm(yes); return { action: a, result: a ? await voiceAct(a) : null }; },
   reset: () => botBrain.reset(),
+  taskAction,
   status: async () => {
     const run = [...orch.running.keys()].map(id => store.chat(id)).filter(Boolean);
     const q = taskQueue.all().filter(j => j.status === 'pending').length;
@@ -186,6 +187,29 @@ const bot = new Bot({
 });
 function syncBot() { const c = bot.d.config(); if (c.enabled && c.token && c.chatId && c.channel) { if (!bot.running) bot.start(); } else if (bot.running) bot.stop(); }
 setTimeout(syncBot, 1500);
+
+// ---- reminders: the panel (toast + spoken), Windows notification, and Telegram/Bale with buttons ----
+const remindKeyboard = t => ({ inline_keyboard: [[{ text: '✅ انجام شد', callback_data: 'done:' + t.id }, { text: '⏰ ۱۰ دقیقه بعد', callback_data: 'snz:' + t.id + ':10' }, { text: '۱ ساعت بعد', callback_data: 'snz:' + t.id + ':60' }]] });
+function reminderText(t) {
+  const at = t.due ? new Date(t.due) : null;
+  const soon = at && at.getTime() - Date.now() > 60000 ? ' — ' + at.toLocaleString('fa-IR', { weekday: 'long', hour: '2-digit', minute: '2-digit' }) : '';
+  return 'یادآوری: ' + t.title + soon;
+}
+function fireReminder(t) {
+  tasks.markReminded(t.id);
+  const text = reminderText(t);
+  broadcast({ type: 'reminder', task: t, text, speak: store.settings().remindSpeak !== false });
+  const s = store.settings(), token = setup.secrets.get('notifyToken');
+  if (s.remindPhone !== false && s.notifyPhone && s.notifyChatId && token) notify.call(s.notifyPhone, token, 'sendMessage', { chat_id: s.notifyChatId, text: '⏰ ' + text, reply_markup: remindKeyboard(t) }).catch(e => console.error('reminder', e.message));
+}
+setInterval(() => { try { for (const t of tasks.dueReminders()) fireReminder(t); } catch (e) { console.error('reminders', e.message); } }, 15000).unref();
+// "done" / "later" from a reminder (panel or Telegram)
+function taskAction(kind, id, arg) {
+  const t = tasks.get(id); if (!t) return 'این تسک دیگر وجود ندارد.';
+  if (kind === 'done') { const r = tasks.complete(id); return r.done ? '✅ انجام شد: ' + t.title : '✅ انجام شد. دفعه‌ی بعد: ' + new Date(r.due).toLocaleString('fa-IR', { dateStyle: 'medium', timeStyle: 'short' }); }
+  if (kind === 'snz') { tasks.snooze(id, +arg || 10); return '⏰ ' + (+arg >= 60 ? (+arg / 60).toLocaleString('fa-IR') + ' ساعت' : (+arg || 10).toLocaleString('fa-IR') + ' دقیقه') + ' دیگر یادآوری می‌کنم: ' + t.title; }
+  return '';
+}
 const voiceLog = [];
 const findByName = (list, name, key = 'name') => { const n = String(name || '').trim().toLowerCase(); if (!n) return null; return list.find(x => String(x[key]).toLowerCase() === n) || list.find(x => String(x[key]).toLowerCase().includes(n) || n.includes(String(x[key]).toLowerCase())) || null; };
 // Carry out the action the brain chose. Returns what happened (shown and spoken by the panel).
@@ -210,8 +234,8 @@ async function voiceAct(a) {
     for (const c of target) orch.stop(c.id);
     return { ok: true, stopped: target.length };
   }
-  if (a.type === 'add_task') { const d = p.due ? Date.parse(p.due) : NaN; const t = tasks.add({ title: p.title, due: Number.isFinite(d) ? new Date(d).toISOString() : null, priority: p.priority }, 'voice'); return { ok: true, task: t }; }
-  if (a.type === 'complete_task') { const t = tasks.get(String(p.id || '')); if (!t) return { ok: false, error: 'تسک پیدا نشد' }; tasks.update(t.id, { done: true }); return { ok: true, task: t }; }
+  if (a.type === 'add_task') { const d = p.due ? Date.parse(p.due) : NaN; const t = tasks.add({ title: p.title, due: Number.isFinite(d) ? new Date(d).toISOString() : null, priority: p.priority, category: p.category, repeat: p.repeat, remindBefore: p.remindBefore }, 'voice'); return { ok: true, task: t }; }
+  if (a.type === 'complete_task') { const t = tasks.get(String(p.id || '')); if (!t) return { ok: false, error: 'تسک پیدا نشد' }; tasks.complete(t.id); return { ok: true, task: t }; }
   if (a.type === 'open') return { ok: true, open: { section: String(p.section || 'home'), chat: p.chat ? (findByName([...store.chats.values()], p.chat, 'title') || {}).id || null : null } };
   return null;
 }
@@ -620,6 +644,17 @@ async function api(req, res, url) {
     try {
       if (!parts[1] && m === 'GET') return send(res, 200, tasks.all());
       if (!parts[1] && m === 'POST') return send(res, 200, tasks.add(body || {}, 'ui'));
+      if (parts[1] && parts[2] === 'done' && m === 'POST') return send(res, 200, tasks.complete(parts[1]));
+      if (parts[1] && parts[2] === 'snooze' && m === 'POST') return send(res, 200, tasks.snooze(parts[1], body.minutes));
+      if (parts[1] && parts[2] === 'run' && m === 'POST') {
+        // hand a work task to the coding team (same path as the voice action)
+        const t = tasks.get(parts[1]); const proj = store.project(String(body.projectId || ''));
+        if (!t || !proj) return send(res, 400, { error: !t ? 'تسک پیدا نشد' : 'پروژه را انتخاب کنید' });
+        const r = await voiceAct({ type: 'run_team', params: { project: proj.name, task: t.title + (t.notes ? '\n\n' + t.notes : ''), mode: body.mode } });
+        if (r && r.ok) tasks.update(t.id, { projectId: proj.id, notes: t.notes });
+        if (r && r.ok) { const tt = tasks.get(t.id); tt.chatId = r.chatId; tasks._save(); }
+        return send(res, r && r.ok ? 200 : 400, r && r.ok ? r : { error: (r && r.error) || 'شروع نشد' });
+      }
       if (parts[1] && m === 'POST') return send(res, 200, tasks.update(parts[1], body || {}));
       if (parts[1] && m === 'DELETE') { tasks.remove(parts[1]); return send(res, 200, { ok: true }); }
     } catch (e) { return send(res, 400, { error: e.message }); }

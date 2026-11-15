@@ -441,6 +441,8 @@ window.addEventListener('jarvis:ev', e => {
 // ---------- entry points ----------
 window.voiceDialog = voiceDialog;
 window.voiceOpen = openSection;
+// reminders etc. speak through the assistant when it is on
+window.voiceSpeak = text => { if (V.state !== "off" && settings().voiceSpeak !== false) speakText(text); };
 window.voiceStart = start;
 const btn = document.getElementById('btnVoice');
 if (btn) btn.onclick = () => (V.state === 'off' ? start(false) : voiceDialog());

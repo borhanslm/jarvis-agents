@@ -16,7 +16,6 @@ const SECTIONS = [
   { id: 'cc', icon: 'radar', label: 'مرکز فرمان', go: () => show('cc') },
   { id: 'code', icon: 'code', label: 'تیم کدنویسی', go: () => show('code') },
   // full-page sections from other modules (AI Core, Chat, …) are inserted here — see registerView
-  { id: 'tasks', icon: 'list-checks', label: 'تسک‌ها', go: () => tasksDialog() },
   { id: 'voice', icon: 'mic', label: 'دستیار صوتی', go: () => window.voiceDialog && window.voiceDialog() },
   { id: 'bot', icon: 'send', label: 'دستیار تلگرام / بله', go: () => { window.__ntReturn = () => {}; window.notifyDialog && window.notifyDialog(); } },
   { id: 'ops', icon: 'activity', label: 'اتاق عملیات', go: () => window.openOps && window.openOps() },
@@ -106,7 +105,7 @@ function renderShell() {
   v.querySelector('#ccOps').onclick = () => window.openOps && window.openOps();
   v.querySelector('#ccCity').onclick = cityDialog;
   v.querySelector('#ccEditClocks').onclick = clocksDialog;
-  v.querySelector('#ccAllTasks').onclick = () => tasksDialog();
+  v.querySelector('#ccAllTasks').onclick = () => window.tasksDialog();
   v.querySelector('.cc-quick-list').onclick = e => { const b = e.target.closest('[data-q]'); if (!b) return; if (b.dataset.q === 'code') { show('code'); setTimeout(() => { const i = $('#homeInput'); if (i) i.focus(); }, 50); } else SECTIONS.find(s => s.id === b.dataset.q).go(); };
   v.querySelector('#ccAddTask').onsubmit = async e => { e.preventDefault(); const i = $('#ccTaskIn'); const t = i.value.trim(); if (!t) return; i.value = ''; try { await api('/tasks', { body: { title: t } }); refresh(); } catch (err) { window.toast(err.message, true); } };
   v.querySelector('#ccTasks').onclick = async e => { const c = e.target.closest('[data-done]'); if (!c) return; try { await api('/tasks/' + c.dataset.done, { body: { done: true } }); refresh(); } catch (err) { window.toast(err.message, true); } };
@@ -253,7 +252,7 @@ async function tasksDialog() {
     } catch (err) { window.toast(err.message, true); }
   };
 }
-window.tasksDialog = tasksDialog;
+window.tasksDialog = () => show(VIEWS.tasks ? 'tasks' : 'cc');
 
 // ---------- the AI core (HUD canvas, hud.js) ----------
 let core = null;
