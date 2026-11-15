@@ -53,6 +53,7 @@ function modelLabel(a) {
   if (a.model === 'engine:claude') return 'Claude Code';
   if (/^p:/.test(a.model)) { const p = (st().providers || []).find(x => a.model.startsWith('p:' + x.id + ':')); return (p ? p.name + ' · ' : '') + a.model.split(':').slice(2).join(':'); }
   if (/^ollama:/.test(a.model)) return 'Ollama · ' + a.model.slice(7) + ' (آفلاین)';
+  if (/^chatgpt/.test(a.model)) return 'ChatGPT (حساب شما)';
   return pretty(a.model);
 }
 function render() {

@@ -109,17 +109,30 @@ function agentSpec(spec, system) {
   if (!m) return { spec, system };
   const a = store.subagents().find(x => x.id === m[1]);
   if (!a) throw new Error('ایجنت پیدا نشد');
-  const own = /^(claude-|p:|ollama:)/.test(a.model || '') ? a.model : (store.settings().voiceModel || 'claude-haiku-5-5');
+  const own = /^(claude-|p:|ollama:|chatgpt)/.test(a.model || '') ? a.model : (store.settings().voiceModel || 'claude-haiku-5-5');
   // the agent's own instructions lead; JARVIS's general chat persona is not added on top
   const extra = system && !/^You are JARVIS/.test(system) ? '\n\n' + system : '';
   return { spec: own, system: a.prompt + extra + '\n\n(Today: ' + new Date().toDateString() + '.)' };
 }
 const chatLLM = async opts => { const r = agentSpec(opts.spec, opts.system); if (/^ollama:/.test(r.spec || '')) await ollama.ensureRunning(); return llm.chat({ ...opts, spec: r.spec, system: r.system, deps: llmDeps() }); };
 // Every model the panel can chat with: Claude, saved connections, local Ollama models.
+// Models the user's ChatGPT account offers in Codex (Codex keeps this list in ~/.codex/models_cache.json)
+const CODEX_NOTE = { sol: 'همه‌کاره', astra: 'قوی‌ترین', terra: 'متعادل', luna: 'سریع و ارزان' };
+function codexModels() {
+  let list = [];
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(process.env.CODEX_HOME || path.join(require('os').homedir(), '.codex'), 'models_cache.json'), 'utf8'));
+    list = (j.models || []).filter(m => m && m.slug && m.visibility === 'list').map(m => { const k = Object.keys(CODEX_NOTE).find(x => m.slug.includes(x)); return { slug: m.slug, name: m.display_name || m.slug, note: (CODEX_NOTE[k] || '') + (/^gpt-5/.test(m.slug) ? ' · نسل قبل' : '') }; });
+  } catch {}
+  if (!list.length) { const d = agents.codexConfigModel(); list = [{ slug: d === 'codex' ? '' : d, name: 'ChatGPT', note: '' }]; }
+  return list;
+}
 async function chatModels() {
   const viaKey = !!setup.secrets.get('anthropicApiKey');
   const out = require('./lib/models').CLAUDE.map(m => ({ spec: m.id, name: m.name, group: 'Claude', note: viaKey ? 'کلید API' : 'Claude Code', ok: true, local: false }));
   for (const p of providers.view()) for (const m of p.models) { const local = isLocalSpec('p:' + p.id + ':' + m); out.push({ spec: 'p:' + p.id + ':' + m, name: m, group: p.name, note: p.hasKey || local ? '' : 'کلید ندارد', ok: p.hasKey || local, local }); }
+  // ChatGPT with the user's own ChatGPT sign-in, through the Codex CLI
+  if (agents.CLIS.codex) for (const m of codexModels()) out.push({ spec: 'chatgpt:' + m.slug, name: m.name, group: 'ChatGPT (حساب شما)', note: m.note, ok: true, local: false });
   for (const a of store.subagents().filter(x => x.stage === 'assistant' && x.enabled)) out.push({ spec: 'agent:' + a.id, name: a.name, group: 'ایجنت‌های من', note: a.description.slice(0, 40), ok: true, local: false, agent: true });
   const ol = await ollama.status();
   for (const m of ol.models) out.push({ spec: 'ollama:' + m.name, name: m.name, group: 'Ollama (آفلاین)', note: (m.size / 1e9).toFixed(1) + ' GB', ok: true, local: true });
@@ -713,7 +726,7 @@ async function api(req, res, url) {
       const t0 = Date.now();
       try {
         const s = store.settings();
-        const own = /^(claude-|p:|ollama:)/.test(ag.model || '') ? ag.model : (s.voiceModel || 'claude-haiku-5-5');
+        const own = /^(claude-|p:|ollama:|chatgpt)/.test(ag.model || '') ? ag.model : (s.voiceModel || 'claude-haiku-5-5');
         const r = await chatLLM({ spec: String(body.model || '') || own, system: ag.prompt + '\n\n(Test run inside JARVIS: there is no file or tool access here. Follow your instructions exactly as in real use.)', messages: [{ role: 'user', content: String(body.text || '').slice(0, 8000) }], maxTokens: 1500, signal: AbortSignal.timeout(120000) });
         return send(res, 200, { ok: true, text: r.text, ms: Date.now() - t0, model: String(body.model || '') || own });
       } catch (e) { return send(res, 200, { ok: false, error: e.message, ms: Date.now() - t0 }); }

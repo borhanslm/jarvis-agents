@@ -101,7 +101,8 @@ async function open(id) {
 }
 function msgHtml(m, i, last) {
   if (m.role === 'user') return `<div class="tk-msg user"><div class="tk-bubble" dir="auto">${esc(m.content).replace(/\n/g, '<br>')}</div></div>`;
-  const meta = [m.model && (window.prettyModel ? window.prettyModel(m.model) : m.model), m.via && m.via !== m.model ? 'آفلاین: ' + m.via.replace(/^ollama:/, '') : '', m.ms && !m.pending ? faN((m.ms / 1000).toFixed(1)) + ' ثانیه' : '', m.stopped ? 'متوقف شد' : ''].filter(Boolean).join(' · ');
+  const nice = x => { const g = /^chatgpt:(.+)$/.exec(x || ''); if (g) return 'ChatGPT · ' + (window.prettyModel ? window.prettyModel(g[1]) : g[1]); const ag = /^agent:(.+)$/.exec(x || ''); if (ag) { const a = ((window.JARVIS_STATE || {}).subagents || []).find(z => z.id === ag[1]); return a ? 'ایجنت ' + a.name : x; } return window.prettyModel ? window.prettyModel(x) : x; };
+  const meta = [m.model && nice(m.model), m.via && m.via !== m.model ? 'آفلاین: ' + m.via.replace(/^ollama:/, '') : '', m.ms && !m.pending ? faN((m.ms / 1000).toFixed(1)) + ' ثانیه' : '', m.stopped ? 'متوقف شد' : ''].filter(Boolean).join(' · ');
   return `<div class="tk-msg bot ${m.error ? 'err' : ''}" data-i="${i}"><div class="tk-av">${ic('sparkles', 'sm')}</div><div class="tk-body">
     <div class="tk-text md">${m.error ? `<p class="bad">${esc(m.error)}</p>` : m.pending && !m.content ? '<span class="tk-dots"><i></i><i></i><i></i></span>' : md(m.content)}</div>
     <div class="tk-meta"><span class="help" dir="auto">${esc(meta)}</span>${!m.pending && m.content ? `<button type="button" class="icon-btn sm" data-copy="${i}" title="کپی" aria-label="کپی">${ic('copy', 'sm')}</button>` : ''}${last && !m.pending ? `<button type="button" class="icon-btn sm" data-regen="1" title="جواب دوباره" aria-label="جواب دوباره">${ic('refresh-cw', 'sm')}</button>` : ''}</div></div></div>`;
