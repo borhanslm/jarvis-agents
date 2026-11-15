@@ -21,15 +21,15 @@ const SECTIONS = [
   { id: 'ops', icon: 'activity', label: 'اتاق عملیات', go: () => window.openOps && window.openOps() },
   { id: 'queue', icon: 'clock', label: 'صف کارها', go: () => window.queueDialog && window.queueDialog() },
   { id: 'ext', icon: 'puzzle', label: 'اتصال‌ها و پلاگین‌ها', go: () => window.extDialog && window.extDialog() },
-  { id: 'settings', icon: 'settings', label: 'تنظیمات', go: () => $('#btnSettings') && $('#btnSettings').click() },
 ];
 
 // Other modules add full-page sections: registerView(id, { icon, label, enter(el), leave() })
 const VIEWS = window.JARVIS_VIEWS || (window.JARVIS_VIEWS = {});
 window.registerView = (id, def) => { VIEWS[id] = def; };
 function buildRail() {
-  const extra = Object.entries(VIEWS).map(([id, v]) => ({ id, icon: v.icon, label: v.label, go: () => show(id) }));
-  SECTIONS.splice(2, 0, ...extra);
+  const extra = Object.entries(VIEWS).map(([id, v]) => ({ id, icon: v.icon, label: v.label, end: !!v.end, go: () => show(id) }));
+  SECTIONS.splice(2, 0, ...extra.filter(x => !x.end));
+  SECTIONS.push(...extra.filter(x => x.end)); // e.g. settings: last in the rail
   const layout = $('.layout');
   if (!layout || $('#rail')) return;
   const nav = document.createElement('nav');

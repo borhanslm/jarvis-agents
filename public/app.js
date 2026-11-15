@@ -1628,7 +1628,7 @@ function renderQuick() {
     + `<button type="button" class="add" data-quickedit="1" title="افزودن یا ویرایش فرمان‌های آماده">${ic(items.length ? 'pencil' : 'plus', 'sm')}${items.length ? '' : 'فرمان آماده'}</button>`;
 }
 $('#quickPrompts').onclick = e => {
-  if (e.target.closest('[data-quickedit]')) { settingsDialog('global').then(() => { const t = [...document.querySelectorAll('#dlgBody .stab')].find(b => /فرمان/.test(b.textContent)); if (t) t.click(); }); return; }
+  if (e.target.closest('[data-quickedit]')) { settingsDialog('global', 'savedPrompts'); return; }
   const b = e.target.closest('[data-quick]'); if (!b) return;
   const q = quickItems()[+b.dataset.quick]; if (!q) return;
   const el = $('#input');
