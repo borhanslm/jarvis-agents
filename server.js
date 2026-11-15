@@ -209,6 +209,22 @@ async function n8nWorkflows() {
 }
 setInterval(() => { try { workflows.tick(); } catch (e) { console.error('workflows', e.message); } }, 30000).unref();
 const agentKit = require('./lib/agent-kit');
+// ---- the members club (required when a club address is set) ----
+const clubLib = require('./lib/club');
+const club = new clubLib.Club({ dataDir: DATA, secrets: setup.secrets, settings: () => store.settings(), defaultUrl: ((require('./package.json').jarvis || {}).clubUrl) || '' });
+const clubBroadcast = () => broadcast({ type: 'club', club: club.state() });
+setTimeout(() => club.refresh().then(clubBroadcast).catch(() => {}), 3000).unref();
+setInterval(() => club.refresh().then(clubBroadcast).catch(() => {}), 6 * 36e5).unref();
+let clubDeploy = null; // { running, log[], error, url }
+// tell the club about a license issued to a member (the seller must be signed in as the club admin)
+async function clubLicense(sale, revoked) {
+  if (!sale.memberEmail || !club.url() || !club.token()) return null;
+  try {
+    if (revoked != null) await club.call('PATCH', '/api/admin/licenses/' + sale.id, { revoked });
+    else await club.call('POST', '/api/admin/licenses', { id: sale.id, email: sale.memberEmail, key: sale.key, code: sale.code, device: sale.device, updatesUntil: sale.updatesUntil });
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
 // ---- the Android app: a separate gateway on the home network (off by default) ----
 const { Mobile } = require('./lib/mobile');
 const mobile = new Mobile({ dataDir: DATA, handleApi: (req, res, url) => api(req, res, url), onChange: () => broadcast({ type: 'mobile', mobile: mobile.status() }) });
@@ -630,7 +646,7 @@ function discover() {
 async function api(req, res, url) {
   const parts = url.pathname.split('/').filter(Boolean).slice(1); // drop "api"
   const m = req.method;
-  const body = m === 'POST' || m === 'PUT' ? await readBody(req) : null;
+  const body = m === 'POST' || m === 'PUT' || ((m === 'PATCH' || m === 'DELETE') && url.pathname.startsWith('/api/club/')) ? await readBody(req) : null;
 
   if (parts[0] === 'events' && m === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
@@ -859,6 +875,37 @@ async function api(req, res, url) {
       if (parts[1] === 'devices' && parts[2] && m === 'DELETE') { mobile.revoke(parts[2]); return send(res, 200, mobile.status()); }
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
+  if (parts[0] === 'club') {
+    try {
+      if (!parts[1] && m === 'GET') return send(res, 200, { ...club.state(), deploy: clubDeploy });
+      if (parts[1] === 'login' && m === 'POST') { const st = await club.login(body); clubBroadcast(); return send(res, 200, st); }
+      if (parts[1] === 'register' && m === 'POST') { const st = await club.register(body); clubBroadcast(); return send(res, 200, st); }
+      if (parts[1] === 'logout' && m === 'POST') { const st = await club.logout(); clubBroadcast(); return send(res, 200, st); }
+      if (parts[1] === 'refresh' && m === 'POST') { const st = await club.refresh(); clubBroadcast(); return send(res, 200, st); }
+      if (parts[1] === 'address' && m === 'POST') {
+        const u = String(body.url || '').trim().replace(/\/+$/, '');
+        if (u && !/^https:\/\/[\w.-]+(:\d+)?$/.test(u)) throw new Error('آدرس باید مثل https://jarvis-club.example.workers.dev باشد');
+        if (u) { const r = await fetch(u + '/api/health', { signal: AbortSignal.timeout(10000) }).then(x => x.json()).catch(() => ({})); if (r.name !== 'jarvis-club') throw new Error('این آدرس باشگاه جارویس نیست یا در دسترس نیست'); }
+        store.updateSettings({ clubUrl: u }); clubBroadcast(); return send(res, 200, club.state());
+      }
+      if (parts[1] === 'cf-login' && m === 'POST') { const r = await clubLib.login(); return send(res, 200, { ok: r.ok, out: r.out.slice(-600) }); }
+      if (parts[1] === 'deploy' && m === 'POST') {
+        if (clubDeploy && clubDeploy.running) throw new Error('در حال راه‌اندازی است');
+        clubDeploy = { running: true, log: [], error: '', url: '' };
+        clubLib.deploy({ dataDir: DATA, adminEmail: body.adminEmail, log: l => { clubDeploy.log.push(l); clubBroadcast(); } })
+          .then(r => { store.updateSettings({ clubUrl: r.url }); clubDeploy = { running: false, log: clubDeploy.log.concat('آماده شد: ' + r.url), error: '', url: r.url }; })
+          .catch(e => { clubDeploy = { running: false, log: clubDeploy.log, error: e.message, needLogin: !!e.needLogin, url: '' }; })
+          .finally(() => broadcast({ type: 'club', club: { ...club.state(), deploy: clubDeploy } }));
+        return send(res, 200, { ...club.state(), deploy: clubDeploy });
+      }
+      if (parts[1] === 'api' && parts.length > 2) {
+        const p = '/' + parts.slice(1).map(encodeURIComponent).join('/') + (url.search || ''); // /api/club/api/x → club /api/x
+        const d = await club.call(m, p, m === 'GET' || (m === 'DELETE' && !Object.keys(body || {}).length) ? undefined : body);
+        if (p.startsWith('/api/me')) club.refresh().then(clubBroadcast).catch(() => {});
+        return send(res, 200, d);
+      }
+    } catch (e) { const st = e.status === 401 ? 400 : e.status && e.status < 600 ? e.status : 400; if (e.status === 401) clubBroadcast(); return send(res, st, { error: e.message, offline: !!e.offline, relogin: e.status === 401 }); }
+  }
   if (parts[0] === 'seller') {
     try {
       const s = store.settings();
@@ -889,16 +936,17 @@ async function api(req, res, url) {
         const before = contact ? sales.filter(x => x.contact === contact && x.issuedAt > Date.now() - 365 * 864e5) : [];
         const code = license.shortCode();
         const sale = { id: r.payload.id, code, codeHash: license.codeHash(code), device: r.payload.d, buyer: String(body.buyer || '').trim().slice(0, 40), contact, amount: Math.max(0, +body.amount || 0), note: String(body.note || '').slice(0, 300),
-          kind: body.kind === 'transfer' ? 'transfer' : 'sale', issuedAt: Date.now(), updatesUntil: r.payload.u * 864e5, key: r.key };
+          kind: body.kind === 'transfer' ? 'transfer' : 'sale', issuedAt: Date.now(), updatesUntil: r.payload.u * 864e5, key: r.key, memberEmail: String(body.memberEmail || '').trim().toLowerCase().slice(0, 120) };
         sales.push(sale); writeSales(sales);
         let published = null; if (s.sellRepo) { try { published = await publishLicenses(); } catch (e) { published = { ok: false, error: e.message }; } }
-        return send(res, 200, { ...sale, previousForContact: before.length, published });
+        const member = await clubLicense(sale);
+        return send(res, 200, { ...sale, previousForContact: before.length, published, member });
       }
       if (parts[1] === 'verify' && m === 'POST') { const v = license.verify(body.key, s.sellerPublicKey, body.device || null); return send(res, 200, { ...v, message: v.ok ? 'معتبر است' : license.REASON_FA[v.reason] }); }
       if (parts[1] === 'publish' && m === 'POST') { if (typeof body.repo === 'string') store.updateSettings({ sellRepo: body.repo.trim() }); return send(res, 200, { ...(await publishLicenses()), view: sellerView() }); }
       if (parts[1] === 'revoke' && parts[2] && m === 'POST') {
         const sales = readSales(); const x = sales.find(y => y.id === parts[2]); if (!x) throw new Error('پیدا نشد');
-        x.revoked = !body.undo; writeSales(sales);
+        x.revoked = !body.undo; writeSales(sales); await clubLicense(x, x.revoked);
         let published = null; if (s.sellRepo) { try { published = await publishLicenses(); } catch (e) { published = { ok: false, error: e.message }; } }
         return send(res, 200, { view: sellerView(), published });
       }

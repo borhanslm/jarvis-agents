@@ -71,6 +71,7 @@ function render() {
         <h2>${ic('send', 'sm')}۳. ساخت کلید برای خریدار</h2>
         ${d.hasKeys ? `<div class="field"><label>کد دستگاه خریدار</label><input id="slDev" dir="ltr" placeholder="ABCD-EF23-GH45" autocomplete="off" class="sl-dev"></div>
           <div class="field-row"><div class="field"><label>نام خریدار</label><input id="slBuyer" dir="auto"></div><div class="field"><label>راه تماس</label><input id="slBuyerC" dir="auto" placeholder="@username یا شماره"></div></div>
+          ${(window.JARVIS_CLUB||{}).required ? `<div class="field"><label>ایمیل عضو باشگاه <span class="help">(اختیاری — لایسنس در حساب خریدار نشان داده می‌شود و اپ خودش فعال می‌شود)</span></label><input id="slMember" type="email" dir="ltr" placeholder="buyer@example.com"></div>` : ""}
           <div class="field-row"><div class="field"><label>مبلغ دریافتی</label><input id="slAmt" type="number" min="0" dir="ltr" value="${esc(String(s.sellPrice || '').replace(/[^\d۰-۹]/g, '').replace(/[۰-۹]/g, x => '۰۱۲۳۴۵۶۷۸۹'.indexOf(x)))}"></div>
             <div class="field"><label>نوع</label><div class="segm" id="slKind"><button type="button" role="radio" aria-checked="true" data-kind="sale">خرید تازه</button><button type="button" role="radio" aria-checked="false" data-kind="transfer">انتقال به گوشی تازه</button></div></div></div>
           <div class="field"><label>یادداشت (مثلاً شماره‌ی رسید)</label><input id="slNoteB" dir="auto"></div>
@@ -126,11 +127,12 @@ function wire() {
   if (kindBox) kindBox.onclick = e => { const b = e.target.closest('[data-kind]'); if (!b) return; kind = b.dataset.kind; kindBox.querySelectorAll('[data-kind]').forEach(x => x.setAttribute('aria-checked', String(x === b))); };
   on('#slIssue', async () => {
     try {
-      const res = await api('/seller/issue', { body: { device: $('#slDev').value, buyer: $('#slBuyer').value, contact: $('#slBuyerC').value, amount: +$('#slAmt').value || 0, note: $('#slNoteB').value, kind } });
+      const res = await api('/seller/issue', { body: { device: $('#slDev').value, buyer: $('#slBuyer').value, contact: $('#slBuyerC').value, amount: +$('#slAmt').value || 0, note: $('#slNoteB').value, kind, memberEmail: ($('#slMember') || {}).value || '' } });
       P.last = res;
       const warn = res.previousForContact ? `<div class="va-tip">${ic('triangle-alert', 'sm')} این خریدار در یک سال اخیر ${faN(res.previousForContact)} کلید دیگر هم گرفته است.</div>` : '';
       const pub = res.published ? (res.published.ok ? `<div class="ok">${ic('circle-check', 'sm')} در GitHub منتشر شد؛ کد کوتاه کار می‌کند.</div>` : `<div class="bad">انتشار نشد: ${esc(res.published.error)} — فعلاً کلید کامل را بفرستید.</div>`) : '';
-      $('#slOut').innerHTML = `<div class="sl-key">${warn}${pub}<div class="help">کد کوتاه:</div><div class="ph-code" dir="ltr">${esc(res.code)}</div><div class="help">کلید کامل (آفلاین):</div><code dir="ltr">${esc(res.key)}</code>
+      const mem = res.member ? (res.member.ok ? `<div class="ok">${ic('circle-check', 'sm')} در حساب باشگاه خریدار ثبت شد.</div>` : `<div class="bad">ثبت در باشگاه نشد: ${esc(res.member.error)}</div>`) : '';
+      $('#slOut').innerHTML = `<div class="sl-key">${warn}${pub}${mem}<div class="help">کد کوتاه:</div><div class="ph-code" dir="ltr">${esc(res.code)}</div><div class="help">کلید کامل (آفلاین):</div><code dir="ltr">${esc(res.key)}</code>
         <pre class="sl-msg" dir="auto">${esc(keyMessage(res))}</pre><div class="row-gap"><button type="button" class="btn btn-sm btn-primary" id="slCopyMsg">${ic('copy', 'sm')}کپی پیام برای خریدار</button><button type="button" class="btn btn-sm" id="slCopyKey">${ic('copy', 'sm')}فقط کلید</button></div></div>`;
       $('#slCopyMsg').onclick = () => copy(keyMessage(res)); $('#slCopyKey').onclick = () => copy(res.key);
       P.d = await api('/seller'); const out = $('#slOut').innerHTML; render(); $('#slOut').innerHTML = out; $('#slCopyMsg').onclick = () => copy(keyMessage(res)); $('#slCopyKey').onclick = () => copy(res.key);
