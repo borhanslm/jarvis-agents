@@ -85,8 +85,11 @@ const { VoiceAssets } = require('./lib/voice/assets');
 const voiceAssets = new VoiceAssets(DATA, { onProgress: () => broadcast({ type: 'voiceAssets', assets: voiceAssets.status() }) });
 const { Speech } = require('./lib/voice/speech');
 // OpenAI-compatible connection used for API speech (the first OpenAI connection that has a key)
-const openaiTarget = () => { const p = providers.view().find(x => x.kind === 'openai' && x.hasKey && /api\.openai\.com/.test(x.baseUrl)); return p ? { baseUrl: p.baseUrl, key: providers.key(p.id) } : null; };
-const speech = new Speech({ assets: voiceAssets, apiTarget: openaiTarget });
+// API speech: Google Gemini (preferred) or OpenAI — whichever has a key in AI Core (setting voiceApi: auto | gemini | openai)
+const openaiTarget = () => { const p = providers.view().find(x => x.hasKey && /api\.openai\.com/.test(x.baseUrl)); return p ? { kind: 'openai', baseUrl: p.baseUrl, key: providers.key(p.id) } : null; };
+const geminiTarget = () => { const s = store.settings(); const p = providers.view().find(x => x.hasKey && /generativelanguage\.googleapis\.com/.test(x.baseUrl)); return p ? { kind: 'gemini', key: providers.key(p.id), sttModel: s.voiceGeminiStt, ttsModel: s.voiceGeminiTts } : null; };
+const voiceApiTarget = () => { const w = store.settings().voiceApi || 'auto'; if (w === 'openai') return openaiTarget(); if (w === 'gemini') return geminiTarget(); return geminiTarget() || openaiTarget(); };
+const speech = new Speech({ assets: voiceAssets, apiTarget: voiceApiTarget });
 const net = require('./lib/net');
 const system = require('./lib/system');
 const { Ollama } = require('./lib/ollama');
@@ -298,7 +301,7 @@ const bot = new Bot({
   tasks: async () => { const t = tasks.today(); return t.length ? '📋 تسک‌های امروز:\n' + t.map(x => '• ' + x.title + (x.due ? ' — ' + new Date(x.due).toLocaleString('fa-IR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '') + (x.priority === 'high' ? ' ❗' : '')).join('\n') : 'برای امروز تسکی نیست.'; },
   stopAll: async () => { const ids = [...orch.running.keys()]; for (const id of ids) orch.stop(id); return ids.length; },
   transcribe: async wav => { const s = store.settings(); return speech.transcribe(wav, { engine: s.voiceStt, offline: !(await voiceOnline(s)), lang: s.voiceLang }); },
-  speak: async text => { const s = store.settings(); return speech.speak(text, { engine: s.voiceTts, offline: !(await voiceOnline(s)), prefs: { faVoice: s.voiceFaVoice, apiVoice: s.voiceApiVoice } }); },
+  speak: async text => { const s = store.settings(); return speech.speak(text, { engine: s.voiceTts, offline: !(await voiceOnline(s)), prefs: { faVoice: s.voiceFaVoice, apiVoice: s.voiceApiVoice, geminiVoice: s.voiceGeminiVoice } }); },
   onLog: e => { botLog.push(e); if (botLog.length > 200) botLog.splice(0, botLog.length - 200); broadcast({ type: 'botLog', entry: e }); },
 });
 function syncBot() { const c = bot.d.config(); if (c.enabled && c.token && c.chatId && c.channel) { if (!bot.running) bot.start(); } else if (bot.running) bot.stop(); }
@@ -941,7 +944,7 @@ async function api(req, res, url) {
   if (parts[0] === 'voice') {
     try {
       const s = store.settings();
-      if (parts[1] === 'status' && m === 'GET') return send(res, 200, { mode: s.voiceMode || 'auto', online: s.voiceMode === 'offline' ? null : await net.online(), ollama: await ollama.status(), assets: voiceAssets.status(), stt: { local: speech.whisper.ready(), api: speech.apiStt.ready(), gpu: speech.whisper.gpu() }, nvidia: nvidiaGpu(), tts: { local: speech.piper.ready('fa'), api: speech.apiTts.ready() }, log: voiceLog.slice(-60) });
+      if (parts[1] === 'status' && m === 'GET') return send(res, 200, { mode: s.voiceMode || 'auto', online: s.voiceMode === 'offline' ? null : await net.online(), ollama: await ollama.status(), assets: voiceAssets.status(), stt: { local: speech.whisper.ready(), api: speech.apiStt.ready(), gpu: speech.whisper.gpu() }, nvidia: nvidiaGpu(), tts: { local: speech.piper.ready('fa'), api: speech.apiTts.ready() }, apiKind: (voiceApiTarget() || {}).kind || null, hasGemini: !!geminiTarget(), hasOpenai: !!openaiTarget(), log: voiceLog.slice(-60) });
       if (parts[1] === 'download' && m === 'POST') return send(res, 200, voiceAssets.download(String(body.id || '')));
       if (parts[1] === 'assets' && parts[2] && m === 'DELETE') { if (parts[2].startsWith('whisper')) speech.stop(); voiceAssets.remove(parts[2]); broadcast({ type: 'voiceAssets', assets: voiceAssets.status() }); return send(res, 200, { ok: true }); }
       // wake-word model files for the panel (only these three names)
@@ -960,7 +963,7 @@ async function api(req, res, url) {
         return send(res, 200, await speech.transcribe(wav, { engine: body.engine === 'local' ? 'local' : s.voiceStt, offline, lang: ['fa', 'en'].includes(body.lang) ? body.lang : s.voiceLang }));
       }
       if (parts[1] === 'tts' && m === 'POST') {
-        const r = await speech.speak(String(body.text || '').slice(0, 2000), { engine: s.voiceTts, offline: !(await voiceOnline(s)), prefs: { faVoice: s.voiceFaVoice, apiVoice: s.voiceApiVoice } });
+        const r = await speech.speak(String(body.text || '').slice(0, 2000), { engine: s.voiceTts, offline: !(await voiceOnline(s)), prefs: { faVoice: s.voiceFaVoice, apiVoice: s.voiceApiVoice, geminiVoice: s.voiceGeminiVoice } });
         return send(res, 200, { audio: r.wav.toString('base64'), ms: r.ms, engine: r.engine });
       }
       if (parts[1] === 'ask' && m === 'POST') {

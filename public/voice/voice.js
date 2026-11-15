@@ -383,10 +383,12 @@ async function voiceDialog() {
     ${olHtml}
     <h4>صدا</h4>
     <div class="field-row"><div class="field"><label>میکروفون</label><select id="vMic">${opts([['', 'پیش‌فرض ویندوز'], ...mics.map(m => [m.deviceId, m.label || 'میکروفون'])], s.voiceMicId)}</select></div></div>
-    <div class="field-row"><div class="field"><label>گفتار به متن</label><select id="vStt">${opts([['auto', 'خودکار (محلی اگر نصب باشد)'], ['local', 'آفلاین — whisper.cpp، رایگان'], ['api', 'آنلاین — OpenAI، دقیق و سریع']], s.voiceStt)}</select></div>
-      <div class="field"><label>متن به گفتار</label><select id="vTts">${opts([['auto', 'خودکار (محلی اگر نصب باشد)'], ['local', 'آفلاین — Piper، رایگان'], ['api', 'آنلاین — OpenAI']], s.voiceTts)}</select></div></div>
+    <div class="field-row"><div class="field"><label>گفتار به متن</label><select id="vStt">${opts([['auto', 'خودکار (محلی اگر نصب باشد)'], ['local', 'آفلاین — whisper.cpp، رایگان'], ['api', 'آنلاین — API (Gemini یا OpenAI)']], s.voiceStt)}</select></div>
+      <div class="field"><label>متن به گفتار</label><select id="vTts">${opts([['auto', 'خودکار (محلی اگر نصب باشد)'], ['local', 'آفلاین — Piper، رایگان'], ['api', 'آنلاین — API (Gemini یا OpenAI)']], s.voiceTts)}</select></div></div>
     <div class="field-row"><div class="field"><label>صدای فارسی (محلی)</label><select id="vFa">${opts([['voice-fa-amir', 'امیر'], ['voice-fa-gyro', 'ژیرو']], s.voiceFaVoice)}</select></div>
-      <div class="field"><label>صدای API</label><select id="vApiVoice" dir="ltr">${opts(['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'].map(x => [x, x]), s.voiceApiVoice)}</select></div></div>
+      <div class="field"><label>صدای OpenAI</label><select id="vApiVoice" dir="ltr">${opts(['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'].map(x => [x, x]), s.voiceApiVoice)}</select></div></div>
+    <div class="field-row"><div class="field"><label>سرویس API صدا</label><select id="vApi">${opts([['auto', 'خودکار — Gemini اگر کلید دارد، وگرنه OpenAI'], ['gemini', 'Google Gemini'], ['openai', 'OpenAI']], s.voiceApi || 'auto')}</select>${st.hasGemini ? '' : '<div class="help">برای Gemini: «هسته‌ی هوش مصنوعی» ← افزودن Google Gemini با کلید (رایگان از aistudio.google.com/apikey).</div>'}</div>
+      <div class="field"><label>صدای Gemini</label><select id="vGemVoice" dir="ltr">${opts(['Kore', 'Puck', 'Charon', 'Fenrir', 'Aoede', 'Leda', 'Orus', 'Zephyr', 'Sulafat', 'Achird'].map(x => [x, x]), s.voiceGeminiVoice || 'Kore')}</select></div></div>
     <div class="field"><label>زبان گفتار</label><select id="vLang">${opts([['auto', 'خودکار فارسی/انگلیسی (کمی کندتر)'], ['fa', 'فقط فارسی (سریع‌تر)'], ['en', 'فقط انگلیسی (سریع‌تر)']], s.voiceLang || 'auto')}</select></div>
     <label class="check"><input type="checkbox" id="vWake" ${s.voiceWake !== false ? 'checked' : ''}> با گفتن «هی جارویس» بیدار شود</label>
     <div class="field"><label>حساسیت «هی جارویس» (${fa(Math.round((+s.voiceWakeThreshold || 0.5) * 100))}٪ — کمتر = حساس‌تر)</label><input id="vThr" type="range" min="0.2" max="0.9" step="0.05" value="${+s.voiceWakeThreshold || 0.5}"></div>
@@ -395,7 +397,7 @@ async function voiceDialog() {
     <div class="help">برای فارسی خوب، «مدل گفتار دقیق» را بگیرید. «هی جارویس» فارسی هم با همین مدل محلی تشخیص داده می‌شود.</div>
     ${st.nvidia && !a['whisper-cuda'].installed ? `<div class="va-tip">${ic('zap', 'sm')} کارت گرافیک <b dir="ltr">${esc(st.nvidia)}</b> دارید: «موتور گفتار روی کارت گرافیک» را بگیرید تا تشخیص گفتار حدود ۲۰ برابر سریع‌تر شود (کمتر از نیم ثانیه).</div>` : ''}
     <div class="va-list">${['wakeword', 'whisper-bin', ...(st.nvidia || a['whisper-cuda'].installed ? ['whisper-cuda'] : []), 'whisper-turbo', 'whisper-base', 'piper-bin', 'voice-fa-amir', 'voice-fa-gyro', 'voice-en-lessac', 'ffmpeg'].map(id => row(id)).join('')}</div>
-    <div class="help">وضعیت: گفتار به متن ${st.stt.local ? 'محلی آماده' : 'محلی ناقص'}${st.stt.api ? '، API آماده' : ''} · متن به گفتار ${st.tts.local ? 'محلی آماده' : 'محلی ناقص'}${st.tts.api ? '، API آماده' : ''}${!st.stt.api ? ' · برای API یک اتصال OpenAI با کلید در «اتصال‌ها» بسازید.' : ''}</div>
+    <div class="help">وضعیت: گفتار به متن ${st.stt.local ? 'محلی آماده' : 'محلی ناقص'}${st.stt.api ? '، API آماده' : ''} · متن به گفتار ${st.tts.local ? 'محلی آماده' : 'محلی ناقص'}${st.tts.api ? '، API آماده' : ''}${st.apiKind ? ' · API: ' + (st.apiKind === 'gemini' ? 'Gemini' : 'OpenAI') : ' · برای صدای API، Gemini یا OpenAI را با کلید در «هسته‌ی هوش مصنوعی» اضافه کنید.'}</div>
     <div class="row-gap"><button type="button" class="btn small" id="vTestTts">${ic('play', 'sm')}آزمایش صدا</button></div>
     <h4>گفتگوهای اخیر</h4><div class="v-log" id="vLog">${logHtml()}</div></div>
     <div class="dlg-actions"><button type="button" class="btn primary" id="vSave">ذخیره</button>
@@ -414,7 +416,7 @@ async function voiceDialog() {
   };
   async function save(close) {
     const body = { voiceMode: $('#vMode').value, voiceModelOffline: $('#vModelOff').value, voiceMicId: $('#vMic').value, voiceModel: $('#vModel').value, voiceStt: $('#vStt').value, voiceTts: $('#vTts').value, voiceFaVoice: $('#vFa').value,
-      voiceApiVoice: $('#vApiVoice').value, voiceLang: $('#vLang').value, voiceWake: $('#vWake').checked, voiceWakeThreshold: +$('#vThr').value, voiceSpeak: $('#vSpeak').checked };
+      voiceApiVoice: $('#vApiVoice').value, voiceApi: $('#vApi').value, voiceGeminiVoice: $('#vGemVoice').value, voiceLang: $('#vLang').value, voiceWake: $('#vWake').checked, voiceWakeThreshold: +$('#vThr').value, voiceSpeak: $('#vSpeak').checked };
     const micChanged = body.voiceMicId !== (settings().voiceMicId || '');
     if (body.voiceMode === 'offline' && !body.voiceModelOffline) { window.toast('برای حالت آفلاین، یک «مغز آفلاین» انتخاب کنید (اول یکی از مدل‌ها را دانلود کنید).', true); return; }
     try { S.settings = await api('/settings', { body }); if (body.voiceModelOffline) api('/voice/warm', { body: {} }).catch(() => {}); setNet(body.voiceMode === 'offline' ? false : undefined); if (close) { $('#dlg').close(); window.toast('ذخیره شد'); } } catch (err) { window.toast(err.message, true); return; }

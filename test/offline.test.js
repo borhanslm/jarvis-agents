@@ -129,3 +129,24 @@ test('a refused Anthropic key falls back to the Claude Code sign-in', async () =
     assert.strictEqual(llm.resolveTarget('claude-haiku-5-5', { anthropicKey: 'sk-bad' }).kind, 'claude-cli');
   } finally { global.fetch = realFetch; agents.runClaude = real; }
 });
+
+test('Gemini speech: transcribe and speak through generateContent (mock server)', async () => {
+  const { Speech, wavFromPcm } = require('../lib/voice/speech');
+  const realFetch = global.fetch; const calls = [];
+  global.fetch = async (url, o) => {
+    const body = JSON.parse(o.body); calls.push({ url, key: o.headers['x-goog-api-key'], body });
+    if (/tts/.test(url)) return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;codec=pcm;rate=24000', data: Buffer.alloc(4800).toString('base64') } }] } }] }));
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'سلام جارویس' }] } }] }));
+  };
+  try {
+    const sp = new Speech({ assets: { find: () => null, has: () => false }, apiTarget: () => ({ kind: 'gemini', key: 'AIza-test' }) });
+    const r = await sp.transcribe(wavFromPcm(Buffer.alloc(32000), 16000), { engine: 'api', lang: 'fa' });
+    assert.strictEqual(r.text, 'سلام جارویس'); assert.strictEqual(r.engine, 'api');
+    assert.match(calls[0].url, /models\/gemini-2\.5-flash:generateContent$/); assert.strictEqual(calls[0].key, 'AIza-test');
+    assert.strictEqual(calls[0].body.contents[0].parts[1].inline_data.mime_type, 'audio/wav');
+    const s = await sp.speak('سلام', { engine: 'api', prefs: { geminiVoice: 'Puck' } });
+    assert.strictEqual(s.wav.slice(0, 4).toString(), 'RIFF'); assert.strictEqual(s.wav.readUInt32LE(24), 24000); assert.strictEqual(s.wav.length, 44 + 4800);
+    assert.strictEqual(calls[1].body.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName, 'Puck');
+    assert.deepStrictEqual(calls[1].body.generationConfig.responseModalities, ['AUDIO']);
+  } finally { global.fetch = realFetch; }
+});
