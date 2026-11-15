@@ -130,10 +130,16 @@ function codexModels() {
   if (!list.length) { const d = agents.codexConfigModel(); list = [{ slug: d === 'codex' ? '' : d, name: 'ChatGPT', note: '' }]; }
   return list;
 }
+const VOICE_MODEL = /tts|transcribe|-live|native-audio|whisper|embedding|imagen|veo/i;
 async function chatModels() {
   const viaKey = !!setup.secrets.get('anthropicApiKey');
   const out = require('./lib/models').CLAUDE.map(m => ({ spec: m.id, name: m.name, group: 'Claude', note: viaKey ? 'کلید API' : 'Claude Code', ok: true, local: false }));
-  for (const p of providers.view()) for (const m of p.models) { const local = isLocalSpec('p:' + p.id + ':' + m); out.push({ spec: 'p:' + p.id + ':' + m, name: m, group: p.name, note: p.hasKey || local ? '' : 'کلید ندارد', ok: p.hasKey || local, local }); }
+  for (const p of providers.view()) for (const m of p.models) {
+    const local = isLocalSpec('p:' + p.id + ':' + m);
+    // voice-only models (text to speech, transcription, live audio) cannot chat
+    if (VOICE_MODEL.test(m)) { out.push({ spec: 'p:' + p.id + ':' + m, name: m, group: p.name, note: 'مدل صدا', ok: false, voice: true, local }); continue; }
+    out.push({ spec: 'p:' + p.id + ':' + m, name: m, group: p.name, note: p.hasKey || local ? '' : 'کلید ندارد', ok: p.hasKey || local, local });
+  }
   // ChatGPT with the user's own ChatGPT sign-in, through the Codex CLI
   if (agents.CLIS.codex) for (const m of codexModels()) out.push({ spec: 'chatgpt:' + m.slug, name: m.name, group: 'ChatGPT (حساب شما)', note: m.note, ok: true, local: false });
   for (const a of store.subagents().filter(x => x.stage === 'assistant' && x.enabled)) out.push({ spec: 'agent:' + a.id, name: a.name, group: 'ایجنت‌های من', note: a.description.slice(0, 40), ok: true, local: false, agent: true });
@@ -850,6 +856,7 @@ async function api(req, res, url) {
   if (parts[0] === 'llms' && m === 'GET') { try { return send(res, 200, await chatModels()); } catch (e) { return send(res, 400, { error: e.message }); } }
   if (parts[0] === 'llms' && parts[1] === 'test' && m === 'POST') {
     const t0 = Date.now();
+    if (VOICE_MODEL.test(String(body.spec || '').replace(/^p:[^:]+:/, ''))) return send(res, 200, { ok: false, voice: true, error: 'مدل صدا است و در چت کار نمی‌کند؛ جارویس خودش برای صدا از آن استفاده می‌کند. صدا را در بخش «صدا» آزمایش کنید.' });
     try { const r = await chatLLM({ spec: String(body.spec || ''), messages: [{ role: 'user', content: 'Reply with exactly: ok' }], maxTokens: 16, signal: AbortSignal.timeout(60000) }); return send(res, 200, { ok: true, ms: Date.now() - t0, text: String(r.text || '').slice(0, 80) }); }
     catch (e) { return send(res, 200, { ok: false, error: e.name === 'TimeoutError' ? 'جواب نداد (بیش از ۶۰ ثانیه)' : e.message }); }
   }

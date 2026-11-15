@@ -230,3 +230,24 @@ test('real: Persian speech -> local text -> back', { skip: !(haveModels && fs.ex
     assert.match(r.text, /سلام/); assert.match(r.text, /امروز/);
   } finally { sp.stop(); }
 });
+
+// Google retires Gemini models: speech falls through to the next model and remembers it
+test('Gemini voice: a retired model falls back to the next one', async () => {
+  const sp = require('../lib/voice/speech');
+  const real = global.fetch, seen = [];
+  global.fetch = async u => {
+    const m = decodeURIComponent(String(u).split('/models/')[1].split(':')[0]); seen.push(m);
+    if (m !== 'gemini-3.8-flash-lite-tts') return new Response(JSON.stringify([{ error: { message: `models/${m} is not found` } }]), { status: 404 });
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;rate=24000', data: Buffer.alloc(64).toString('base64') } }] } }] }), { status: 200 });
+  };
+  try {
+    const tts = new sp.ApiTTS(() => ({ kind: 'gemini', key: 'k', ttsModel: 'gemini-2.5-flash-preview-tts' }));
+    await tts.speak('سلام');
+    assert.deepEqual(seen, ['gemini-2.5-flash-preview-tts', 'gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts']);
+    seen.length = 0; await tts.speak('دوباره');
+    assert.deepEqual(seen, ['gemini-3.8-flash-lite-tts'], 'remembers the working model');
+    // a wrong key is not a model problem: stop at once
+    global.fetch = async () => new Response(JSON.stringify([{ error: { message: 'API key not valid' } }]), { status: 400 });
+    await assert.rejects(new sp.ApiTTS(() => ({ kind: 'gemini', key: 'bad' })).speak('x'), /کلید API/);
+  } finally { global.fetch = real; }
+});

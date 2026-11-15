@@ -62,6 +62,7 @@ async function render() {
 
 function testHtml(r) {
   if (r === 'wait') return `<span class="help">در حال آزمایش…</span>`;
+  if (r.voice) return `<span class="help" title="${esc(r.error)}">${ic('mic', 'sm')}مدل صدا — برای صدای جارویس</span>`;
   return r.ok ? `<span class="ok">${ic('circle-check', 'sm')}${faN((r.ms / 1000).toFixed(1))} ثانیه</span>` : `<span class="bad" title="${esc(r.error)}">${ic('circle-x', 'sm')}${esc(String(r.error).slice(0, 80))}</span>`;
 }
 
