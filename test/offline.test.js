@@ -104,3 +104,13 @@ test('speech: no internet -> falls back to the local engine; a refusal is not hi
   assert.deepStrictEqual(calls, ['api', 'local']);
   await assert.rejects(sp.speak('سلام', { engine: 'api' }), /401/); // a key problem is shown, not silently replaced
 });
+
+test('speech auto: free local first; never the paid API without a key', async () => {
+  const sp = new Speech({ assets: { find: () => null, has: () => false }, apiTarget: () => null });
+  // nothing local yet, no OpenAI key: explains the free voice is still downloading (no API attempt)
+  await assert.rejects(sp.speak('سلام', { engine: 'auto' }), /رایگان هنوز دانلود نشده/);
+  const { sp: sp2, calls } = speechWith({ apiFails: false });
+  sp2.piper.ready = () => false; sp2.apiTts.ready = () => true; sp2.apiTts.speak = async () => { calls.push('apitts'); return { wav: Buffer.alloc(10) }; };
+  await sp2.speak('سلام', { engine: 'auto' }); // a key exists and local is missing: API is fine
+  assert.deepStrictEqual(calls, ['apitts']);
+});

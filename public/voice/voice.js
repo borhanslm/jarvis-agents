@@ -194,7 +194,13 @@ async function speakText(text, { thenListen = false } = {}) {
     const a = V.audio = new Audio(url);
     a.onended = () => { URL.revokeObjectURL(url); if (V.audio === a) { V.audio = null; afterSpeech(thenListen || true); } };
     await a.play();
-  } catch (e) { addLog('error', 'پخش صدا: ' + e.message); afterSpeech(thenListen); }
+  } catch (e) {
+    // free voice still downloading: say it once, quietly, and keep answering in text
+    if (/هنوز دانلود نشده/.test(e.message)) { if (!V.ttsNoted) { V.ttsNoted = true; setHint(e.message); } }
+    else addLog('error', 'پخش صدا: ' + e.message);
+    if (V.state === 'speaking') setState('idle');
+    afterSpeech(thenListen);
+  }
 }
 function stopSpeaking() { if (V.audio) { V.audio.pause(); V.audio = null; } }
 // after an answer, listen a few seconds for a follow-up without the wake word
