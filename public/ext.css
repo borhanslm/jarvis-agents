@@ -81,6 +81,37 @@
   .ext-row { flex-wrap: wrap; }
 }
 
+/* ---- voice assistant ---- */
+.voice-btn.on { color: var(--color-primary); box-shadow: 0 0 0 2px var(--color-primary-soft); }
+.voice-btn[data-state="recording"] { color: var(--color-danger); animation: vpulse 1s ease-in-out infinite; }
+@keyframes vpulse { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-danger) 25%, transparent); } }
+.voice-dock { position: fixed; bottom: var(--p-space-4); inset-inline-start: 50%; transform: translateX(50%); z-index: 120; display: flex; align-items: center; gap: var(--p-space-3);
+  padding: var(--p-space-2) var(--p-space-3); min-width: min(560px, calc(100vw - 32px)); max-width: calc(100vw - 32px);
+  background: color-mix(in srgb, var(--color-surface-2) 90%, transparent); border: 1px solid var(--color-primary-line); border-radius: 999px; backdrop-filter: blur(12px);
+  box-shadow: 0 10px 40px rgb(0 0 0 / .35), 0 0 24px color-mix(in srgb, var(--color-primary) 18%, transparent); }
+.voice-dock[hidden] { display: none; }
+.vd-orb { width: 56px; height: 56px; flex: none; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle, var(--color-primary-soft), transparent 70%); }
+.vd-orb canvas { width: 56px; height: 56px; }
+.voice-dock[data-state="recording"] .vd-orb { background: radial-gradient(circle, color-mix(in srgb, var(--color-danger) 25%, transparent), transparent 70%); }
+.vd-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.vd-state { font-size: var(--text-xs); color: var(--color-fg-muted); }
+.vd-hint { color: var(--color-fg-strong); font-size: var(--text-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vd-confirm { display: flex; align-items: center; gap: var(--p-space-2); flex-wrap: wrap; font-size: var(--text-xs); color: var(--color-warning); }
+.vd-confirm[hidden] { display: none; }
+.vd-acts { display: flex; gap: 2px; }
+.va-list { display: flex; flex-direction: column; gap: var(--p-space-1); }
+.va-row { display: flex; align-items: center; gap: var(--p-space-2); flex-wrap: wrap; padding: var(--p-space-2); border: 1px solid var(--color-border-subtle); border-radius: var(--p-radius-md); }
+.va-row > span:first-child { flex: 1 1 220px; }
+.va-row .ok { color: var(--color-success); font-size: var(--text-xs); display: inline-flex; gap: 4px; align-items: center; }
+.va-row .bad { color: var(--color-danger); font-size: var(--text-xs); }
+.va-row progress { width: 120px; }
+.v-log { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; font-size: var(--text-sm); }
+.v-log .vl { display: flex; gap: var(--p-space-2); }
+.v-log .vl b { flex: none; color: var(--color-fg-muted); font-weight: 500; min-width: 48px; }
+.v-log .vl.jarvis b { color: var(--color-primary); }
+.v-log .vl.error { color: var(--color-danger); }
+@media (prefers-reduced-motion: reduce) { .voice-btn[data-state="recording"] { animation: none; } }
+
 /* ---- 3D ops room ---- */
 .ops { position: fixed; inset: 0; z-index: 150; background: radial-gradient(ellipse at center, color-mix(in srgb, var(--color-primary) 10%, var(--color-bg)) 0%, var(--color-bg) 70%); }
 .ops[hidden] { display: none; }
@@ -109,3 +140,4 @@
 /* CSS2DRenderer positions labels from the top-left corner: keep that container LTR */
 .ops-labels > * { left: 0; top: 0; }
 .ops-label { direction: rtl; }
+.va-tip { padding: var(--p-space-2) var(--p-space-3); border-radius: var(--p-radius-md); background: var(--color-primary-soft); border: 1px solid var(--color-primary-line); font-size: var(--text-sm); }

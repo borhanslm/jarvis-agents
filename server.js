@@ -77,6 +77,71 @@ orch.connectors = connectors;
 const { Plugins } = require('./lib/plugins');
 const plugins = new Plugins(DATA, { store, skills, connectors });
 orch.pluginSkills = () => plugins.all().filter(p => p.enabled && !p.subagents.length).flatMap(p => p.skills);
+// ---- voice assistant: speech in/out, the brain, tasks ----
+const llm = require('./lib/llm');
+const { Tasks } = require('./lib/tasks');
+const tasks = new Tasks(DATA, { onChange: list => broadcast({ type: 'tasks', tasks: list }) });
+const { VoiceAssets } = require('./lib/voice/assets');
+const voiceAssets = new VoiceAssets(DATA, { onProgress: () => broadcast({ type: 'voiceAssets', assets: voiceAssets.status() }) });
+const { Speech } = require('./lib/voice/speech');
+// OpenAI-compatible connection used for API speech (the first OpenAI connection that has a key)
+const openaiTarget = () => { const p = providers.view().find(x => x.kind === 'openai' && x.hasKey && /api\.openai\.com/.test(x.baseUrl)); return p ? { baseUrl: p.baseUrl, key: providers.key(p.id) } : null; };
+const speech = new Speech({ assets: voiceAssets, apiTarget: openaiTarget });
+const llmDeps = () => ({ providers, anthropicKey: setup.secrets.get('anthropicApiKey') });
+const { Brain } = require('./lib/voice/brain');
+// an NVIDIA card makes local speech recognition ~20x faster (checked once)
+let _gpu;
+function nvidiaGpu() {
+  if (_gpu !== undefined) return _gpu;
+  _gpu = null;
+  if (process.platform === 'win32') require('child_process').execFile('powershell', ['-NoProfile', '-Command', '(Get-CimInstance Win32_VideoController).Name'], { windowsHide: true, timeout: 15000 }, (e, out) => { const n = String(out || '').split(/\r?\n/).find(l => /nvidia/i.test(l)); _gpu = n ? n.trim() : null; });
+  return _gpu;
+}
+nvidiaGpu();
+const voiceContext = () => {
+  const chats = [...store.chats.values()];
+  const proj = id => (store.project(id) || {}).name || '?';
+  const lastReport = c => { const m = [...c.messages].reverse().find(x => x.kind === 'report'); return m ? `${m.report.rounds || 0} rounds, ${(m.report.files || []).length} files changed${m.report.openBugs ? ', ' + m.report.openBugs + ' open bugs' : ''}` : ''; };
+  return {
+    now: new Date().toString(),
+    projects: store.projects().map(p => ({ id: p.id, name: p.name })),
+    running: [...orch.running.keys()].map(id => store.chat(id)).filter(Boolean).map(c => ({ id: c.id, title: c.title, project: proj(c.projectId), status: c.status })),
+    recent: chats.filter(c => !orch.running.has(c.id) && c.messages.length && ['done', 'error', 'needs-attention', 'unverified', 'stopped', 'budget'].includes(c.status))
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 3).map(c => ({ title: c.title, status: c.status, report: lastReport(c) })),
+    tasks: tasks.today().slice(0, 25),
+  };
+};
+const brain = new Brain({ chat: opts => llm.chat({ ...opts, deps: llmDeps() }), context: voiceContext });
+const voiceLog = [];
+const findByName = (list, name, key = 'name') => { const n = String(name || '').trim().toLowerCase(); if (!n) return null; return list.find(x => String(x[key]).toLowerCase() === n) || list.find(x => String(x[key]).toLowerCase().includes(n) || n.includes(String(x[key]).toLowerCase())) || null; };
+// Carry out the action the brain chose. Returns what happened (shown and spoken by the panel).
+async function voiceAct(a) {
+  if (!a) return null;
+  const p = a.params || {};
+  if (a.type === 'run_team') {
+    const proj = findByName(store.projects(), p.project);
+    if (!proj) return { ok: false, error: 'پروژه پیدا نشد: ' + (p.project || '') };
+    const text = String(p.task || '').trim();
+    if (!text) return { ok: false, error: 'کار مشخص نشد' };
+    const mode = ['team', 'smart', 'audit', 'plan'].includes(p.mode) ? p.mode : 'team';
+    const chat = store.newChat(proj.id, text.replace(/\s+/g, ' ').slice(0, 48));
+    if (needsClaudeAccount(chat, mode) && !(await claudeReady())) { store.deleteChat(chat.id); return { ok: false, error: 'Claude هنوز وصل نیست' }; }
+    broadcast({ type: 'chat', chat: store.chatSummary(chat) });
+    orch.run(chat, proj, text, mode).catch(e => console.error('voice run', e));
+    return { ok: true, chatId: chat.id, projectId: proj.id };
+  }
+  if (a.type === 'stop') {
+    const running = [...orch.running.keys()].map(id => store.chat(id)).filter(Boolean);
+    const target = p.chat ? [findByName(running, p.chat, 'title')].filter(Boolean) : running;
+    for (const c of target) orch.stop(c.id);
+    return { ok: true, stopped: target.length };
+  }
+  if (a.type === 'add_task') { const t = tasks.add({ title: p.title, due: p.due || null, priority: p.priority }, 'voice'); return { ok: true, task: t }; }
+  if (a.type === 'complete_task') { const t = tasks.get(String(p.id || '')); if (!t) return { ok: false, error: 'تسک پیدا نشد' }; tasks.update(t.id, { done: true }); return { ok: true, task: t }; }
+  if (a.type === 'open') return { ok: true, open: { section: String(p.section || 'home'), chat: p.chat ? (findByName([...store.chats.values()], p.chat, 'title') || {}).id || null : null } };
+  return null;
+}
+
 const extState = () => ({ connectors: connectors.view(), plugins: plugins.all(), pluginCommands: plugins.commands() });
 const extChanged = () => { broadcast({ type: 'ext', ...extState() }); broadcast({ type: 'subagents', subagents: store.subagents() }); broadcast({ type: 'skills', skills: skills.all() }); };
 
@@ -266,7 +331,7 @@ function exportChat(chat, proj) {
 }
 
 // ---- helpers ---------------------------------------------------------------
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.wasm': 'application/wasm', '.png': 'image/png', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8' };
 
 function send(res, code, body) {
   const s = typeof body === 'string' ? body : JSON.stringify(body);
@@ -276,7 +341,7 @@ function send(res, code, body) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let b = '';
-    req.on('data', d => { b += d; if (b.length > 2e6) { reject(new Error('body too large')); req.destroy(); } });
+    req.on('data', d => { b += d; if (b.length > 8e6) { reject(new Error('body too large')); req.destroy(); } });
     req.on('end', () => { try { resolve(b ? JSON.parse(b) : {}); } catch (e) { reject(e); } });
   });
 }
@@ -342,6 +407,7 @@ async function api(req, res, url) {
       clis: { claude: !!agents.CLIS.claude, codex: !!agents.CLIS.codex },
       codexDefaultModel: agents.codexConfigModel(),
       claudeAuth: await claudeAuthMethod(),
+      tasks: tasks.all(), voiceAssets: voiceAssets.status(),
       providers: providers.view(), providerPresets: PRESETS, ...extState(), connectorCatalog: CONNECTOR_CATALOG, queueJobs: taskQueue.all(),
       modelCatalog: { claude: require('./lib/models').CLAUDE },
       running: [...orch.running.keys()],
@@ -464,6 +530,54 @@ async function api(req, res, url) {
   }
   if (parts[0] === 'discover' && m === 'GET') return send(res, 200, discover());
 
+  if (parts[0] === 'tasks') {
+    try {
+      if (!parts[1] && m === 'GET') return send(res, 200, tasks.all());
+      if (!parts[1] && m === 'POST') return send(res, 200, tasks.add(body || {}, 'ui'));
+      if (parts[1] && m === 'POST') return send(res, 200, tasks.update(parts[1], body || {}));
+      if (parts[1] && m === 'DELETE') { tasks.remove(parts[1]); return send(res, 200, { ok: true }); }
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
+  if (parts[0] === 'voice') {
+    try {
+      const s = store.settings();
+      if (parts[1] === 'status' && m === 'GET') return send(res, 200, { assets: voiceAssets.status(), stt: { local: speech.whisper.ready(), api: speech.apiStt.ready(), gpu: speech.whisper.gpu() }, nvidia: nvidiaGpu(), tts: { local: speech.piper.ready('fa'), api: speech.apiTts.ready() }, log: voiceLog.slice(-60) });
+      if (parts[1] === 'download' && m === 'POST') return send(res, 200, voiceAssets.download(String(body.id || '')));
+      if (parts[1] === 'assets' && parts[2] && m === 'DELETE') { if (parts[2].startsWith('whisper')) speech.stop(); voiceAssets.remove(parts[2]); broadcast({ type: 'voiceAssets', assets: voiceAssets.status() }); return send(res, 200, { ok: true }); }
+      // wake-word model files for the panel (only these three names)
+      if (parts[1] === 'model' && m === 'GET') {
+        const f = ['melspectrogram.onnx', 'embedding_model.onnx', 'hey_jarvis.onnx'].includes(parts[2]) && voiceAssets.find('wakeword', parts[2]);
+        if (!f) return send(res, 404, { error: 'مدل تشخیص «هی جارویس» دانلود نشده' });
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'max-age=86400' });
+        return fs.createReadStream(f).pipe(res);
+      }
+      if (parts[1] === 'stt' && m === 'POST') {
+        const wav = Buffer.from(String(body.audio || ''), 'base64');
+        if (wav.length < 1000) return send(res, 400, { error: 'صدایی ضبط نشد' });
+        // the panel's Persian wake-word check may only ever use the local engine
+        return send(res, 200, await speech.transcribe(wav, { engine: body.engine === 'local' ? 'local' : s.voiceStt, lang: ['fa', 'en'].includes(body.lang) ? body.lang : s.voiceLang }));
+      }
+      if (parts[1] === 'tts' && m === 'POST') {
+        const r = await speech.speak(String(body.text || '').slice(0, 2000), { engine: s.voiceTts, prefs: { faVoice: s.voiceFaVoice, apiVoice: s.voiceApiVoice } });
+        return send(res, 200, { audio: r.wav.toString('base64'), ms: r.ms, engine: r.engine });
+      }
+      if (parts[1] === 'ask' && m === 'POST') {
+        const text = String(body.text || '').trim().slice(0, 2000);
+        const r = await brain.handle(text, { spec: s.voiceModel || 'claude-haiku-5-5' });
+        const result = r.confirm ? null : await voiceAct(r.action);
+        voiceLog.push({ ts: Date.now(), user: text, say: r.say, action: r.action, confirm: r.confirm, result });
+        if (voiceLog.length > 200) voiceLog.splice(0, voiceLog.length - 200);
+        return send(res, 200, { ...r, result });
+      }
+      if (parts[1] === 'confirm' && m === 'POST') {
+        const a = brain.confirm(!!body.yes);
+        const result = a ? await voiceAct(a) : null;
+        voiceLog.push({ ts: Date.now(), user: body.yes ? '(تأیید)' : '(لغو)', say: '', action: a, result });
+        return send(res, 200, { action: a, result });
+      }
+      if (parts[1] === 'reset' && m === 'POST') { brain.reset(); return send(res, 200, { ok: true }); }
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
   if (parts[0] === 'connectors') {
     try {
       if (!parts[1] && m === 'GET') return send(res, 200, connectors.view());
@@ -770,6 +884,7 @@ server.listen(PORT, HOST, () => {
 function stopAll() {
   for (const id of [...orch.running.keys()]) orch.stop(id);
   for (const id of [...previews.keys()]) stopPreview(id);
+  speech.stop(); // the resident whisper server
   store.flush();
 }
 if (require.main === module) {
