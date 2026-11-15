@@ -342,3 +342,13 @@
 .sl-table tr:hover td { background: var(--color-hover); }
 .sl-acts { white-space: nowrap; text-align: end; }
 @media (max-width: 860px) { .sl-grid { grid-template-columns: 1fr; } }
+
+/* ---- Phone ---- */
+.ph-switch { min-width: 240px; }
+.ph-qr-wrap { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.ph-qr { width: 200px; height: 200px; border-radius: 4px; box-shadow: 0 0 0 4px var(--color-primary-soft), 0 0 30px color-mix(in srgb, var(--color-primary) 30%, transparent); }
+.ph-code { font-family: var(--font-mono); font-size: 32px; letter-spacing: .12em; color: var(--color-primary); text-shadow: 0 0 12px color-mix(in srgb, var(--color-primary) 50%, transparent); margin: 6px 0; }
+.ph-steps { line-height: 2; padding-inline-start: 18px; }
+.ph-devs { display: flex; flex-direction: column; gap: 8px; }
+.ph-dev { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 3px; background: var(--color-surface-1); border: 1px solid color-mix(in srgb, var(--color-primary) 15%, transparent); }
+.ph-dev > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }

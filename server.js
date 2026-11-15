@@ -206,6 +206,16 @@ async function n8nWorkflows() {
 }
 setInterval(() => { try { workflows.tick(); } catch (e) { console.error('workflows', e.message); } }, 30000).unref();
 const agentKit = require('./lib/agent-kit');
+// ---- the Android app: a separate gateway on the home network (off by default) ----
+const { Mobile } = require('./lib/mobile');
+const mobile = new Mobile({ dataDir: DATA, handleApi: (req, res, url) => api(req, res, url), onChange: () => broadcast({ type: 'mobile', mobile: mobile.status() }) });
+async function syncMobile() {
+  const s = store.settings();
+  if (s.mobileEnabled && !mobile.server) { try { await mobile.start(+s.mobilePort || 47780); } catch (e) { console.error('mobile gateway', e.message); try { await mobile.start(0); } catch {} } }
+  else if (!s.mobileEnabled && mobile.server) mobile.stop();
+  broadcast({ type: 'mobile', mobile: mobile.status() });
+}
+setTimeout(syncMobile, 1200);
 // ---- selling the Android app: signing keys and the sales log (seller mode only) ----
 const license = require('./lib/license');
 const SALES_FILE = path.join(DATA, 'sales.json');
@@ -816,6 +826,14 @@ async function api(req, res, url) {
       if (parts[2] === 'export' && m === 'GET') { res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(talks.markdown(id)); }
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
+  if (parts[0] === 'mobile') {
+    try {
+      if (parts[1] === 'status' && m === 'GET') return send(res, 200, mobile.status());
+      if (parts[1] === 'enable' && m === 'POST') { store.updateSettings({ mobileEnabled: !!body.on }); await syncMobile(); return send(res, 200, mobile.status()); }
+      if (parts[1] === 'pair' && m === 'POST') return send(res, 200, mobile.startPairing());
+      if (parts[1] === 'devices' && parts[2] && m === 'DELETE') { mobile.revoke(parts[2]); return send(res, 200, mobile.status()); }
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
   if (parts[0] === 'seller') {
     try {
       const s = store.settings();
@@ -934,7 +952,8 @@ async function api(req, res, url) {
         return fs.createReadStream(f).pipe(res);
       }
       if (parts[1] === 'stt' && m === 'POST') {
-        const wav = Buffer.from(String(body.audio || ''), 'base64');
+        let wav = Buffer.from(String(body.audio || ''), 'base64');
+        if (body.format && body.format !== 'wav' && wav.length > 100) { if (!media.ready()) return send(res, 400, { error: 'برای صدای گوشی، FFmpeg را از تنظیمات صدا دانلود کنید' }); wav = await media.toWav16k(wav); }
         if (wav.length < 1000) return send(res, 400, { error: 'صدایی ضبط نشد' });
         // the panel's Persian wake-word check may only ever use the local engine
         const offline = body.engine === 'local' || !(await voiceOnline(s));
@@ -1288,6 +1307,7 @@ function stopAll() {
   for (const id of [...previews.keys()]) stopPreview(id);
   speech.stop(); // the resident whisper server
   for (const id of [...talks.running.keys()]) talks.stop(id);
+  try { mobile.stop(); } catch {}
   for (const id of [...workflows.live.keys()]) { try { workflows.pause(id); } catch {} }
   bot.stop();
   talks.flush();
