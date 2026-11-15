@@ -94,4 +94,5 @@
 <symbol id="i-cloud-sun" viewBox="0 0 24 24"><path d="M12 2v2" /><path d="m4.93 4.93 1.41 1.41" /><path d="M20 12h2" /><path d="m19.07 4.93-1.41 1.41" /><path d="M15.95 12.06A4 4 0 0 0 8.2 10.4" /><path d="M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z" /></symbol>
 <symbol id="i-map-pin" viewBox="0 0 24 24"><path d="M20 10c0 4.99-5.54 10.19-7.4 11.79a1 1 0 0 1-1.2 0C9.54 20.19 4 14.99 4 10a8 8 0 0 1 16 0" /><circle cx="12" cy="10" r="3" /></symbol>
 <symbol id="i-arrow-up-left" viewBox="0 0 24 24"><path d="M7 17V7h10" /><path d="M17 17 7 7" /></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><rect x="14" y="4" width="4" height="16" rx="1" /><rect x="6" y="4" width="4" height="16" rx="1" /></symbol>
 </svg>

@@ -113,6 +113,48 @@ async function chatModels() {
   for (const m of ol.models) out.push({ spec: 'ollama:' + m.name, name: m.name, group: 'Ollama (آفلاین)', note: (m.size / 1e9).toFixed(1) + ' GB', ok: true, local: true });
   return out;
 }
+// ---- workflows ----
+const { Workflows, TEMPLATES: WF_TEMPLATES, TYPES: WF_TYPES, fromDescription } = require('./lib/workflows');
+const wfAskMsgs = new Map(); // Telegram message id -> run id (answers to "ask me")
+// run the coding team on a project and wait until it finishes
+async function runTeam({ projectId, task, mode, signal }) {
+  const proj = store.project(String(projectId || '')) || store.projects()[0];
+  if (!proj) throw new Error('پروژه‌ای برای تیم ایجنت‌ها نیست');
+  const text = String(task || '').trim(); if (!text) throw new Error('کار مشخص نشده');
+  const m = ['team', 'smart', 'audit', 'plan'].includes(mode) ? mode : 'team';
+  const chat = store.newChat(proj.id, ('⚙ ' + text).replace(/\s+/g, ' ').slice(0, 48));
+  if (needsClaudeAccount(chat, m) && !(await claudeReady())) { store.deleteChat(chat.id); throw new Error('Claude هنوز وصل نیست'); }
+  broadcast({ type: 'chat', chat: store.chatSummary(chat) });
+  const onAbort = () => orch.stop(chat.id);
+  if (signal) signal.addEventListener('abort', onAbort, { once: true });
+  try { await orch.run(chat, proj, text, m, { autoApprove: true }); } finally { if (signal) signal.removeEventListener('abort', onAbort); }
+  const c = store.chat(chat.id) || chat;
+  const rep = [...c.messages].reverse().find(x => x.kind === 'report');
+  const ok = ['done', 'unverified'].includes(c.status);
+  return { ok, status: c.status, chatId: chat.id, report: rep ? `وضعیت: ${c.status}، ${(rep.report.files || []).length} فایل تغییر کرد${rep.report.openBugs ? '، ' + rep.report.openBugs + ' باگ باز' : ''}` : c.status };
+}
+const workflows = new Workflows(DATA, {
+  chat: chatLLM, runTeam,
+  addTask: b => tasks.add(b, 'workflow'),
+  defaultModel: () => store.settings().voiceModel || 'claude-haiku-5-5',
+  notify: async text => {
+    const s = store.settings(), token = setup.secrets.get('notifyToken');
+    broadcast({ type: 'wfNotify', text });
+    if (s.notifyPhone && s.notifyChatId && token) await notify.call(s.notifyPhone, token, 'sendMessage', { chat_id: s.notifyChatId, text: String(text).slice(0, 3900) });
+  },
+  ask: async (run, p) => {
+    broadcast({ type: 'wfAsk', run, pending: p });
+    const s = store.settings(), token = setup.secrets.get('notifyToken');
+    if (!(s.notifyPhone && s.notifyChatId && token)) return;
+    const head = '🔀 ' + run.name + '\n\n' + p.question;
+    const msg = p.kind === 'approve'
+      ? await notify.call(s.notifyPhone, token, 'sendMessage', { chat_id: s.notifyChatId, text: head.slice(0, 3900), reply_markup: { inline_keyboard: [[{ text: '✅ بله', callback_data: 'wf:' + run.id + ':yes' }, { text: '❌ نه', callback_data: 'wf:' + run.id + ':no' }]] } })
+      : await notify.call(s.notifyPhone, token, 'sendMessage', { chat_id: s.notifyChatId, text: (head + '\n\n↩️ جواب را به‌صورت «پاسخ» (Reply) به همین پیام بفرستید.').slice(0, 3900), reply_markup: { force_reply: true } });
+    if (msg && msg.message_id) { wfAskMsgs.set(msg.message_id, run.id); if (wfAskMsgs.size > 200) wfAskMsgs.delete(wfAskMsgs.keys().next().value); }
+  },
+  onEvent: ev => broadcast(ev),
+});
+setInterval(() => { try { workflows.tick(); } catch (e) { console.error('workflows', e.message); } }, 30000).unref();
 const { Talks } = require('./lib/talks');
 const talks = new Talks(DATA, { chat: chatLLM, onEvent: ev => broadcast(ev) });
 // No internet + an online model chosen: answer with the offline model (mode "auto" only)
@@ -174,6 +216,8 @@ const bot = new Bot({
   confirm: async yes => { const a = botBrain.confirm(yes); return { action: a, result: a ? await voiceAct(a) : null }; },
   reset: () => botBrain.reset(),
   taskAction,
+  onCallback: async data => { const m = /^wf:([\w-]+):(yes|no)$/.exec(data); if (!m) return null; try { workflows.answer(m[1], m[2] === 'yes'); return m[2] === 'yes' ? '✅ تأیید شد؛ ورک‌فلو ادامه می‌دهد.' : '❌ رد شد.'; } catch (e) { return '⚠️ ' + e.message; } },
+  onReply: async (msgId, text) => { const id = wfAskMsgs.get(msgId); if (!id) return null; try { workflows.answer(id, text); wfAskMsgs.delete(msgId); return '👍 جواب ثبت شد؛ ورک‌فلو ادامه می‌دهد.'; } catch (e) { return '⚠️ ' + e.message; } },
   status: async () => {
     const run = [...orch.running.keys()].map(id => store.chat(id)).filter(Boolean);
     const q = taskQueue.all().filter(j => j.status === 'pending').length;
@@ -685,6 +729,33 @@ async function api(req, res, url) {
       if (parts[2] === 'export' && m === 'GET') { res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(talks.markdown(id)); }
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
+  // ---- workflows ----
+  if (parts[0] === 'workflows') {
+    try {
+      const id = parts[1];
+      if (!id && m === 'GET') return send(res, 200, { list: workflows.all(), templates: WF_TEMPLATES, types: WF_TYPES, waiting: workflows.waiting().map(r => workflows.view(r)) });
+      if (!id && m === 'POST') { const w = workflows.save(body || {}); broadcast({ type: 'workflows' }); return send(res, 200, w); }
+      if (id === 'generate' && m === 'POST') {
+        const s = store.settings();
+        const spec = String(body.model || '') || ((await voiceOnline(s)) ? (s.voiceModel || 'claude-haiku-5-5') : offlineSpec(s));
+        if (!spec) throw new Error('اینترنت نیست و مدل آفلاین انتخاب نشده');
+        return send(res, 200, await fromDescription(chatLLM, spec, String(body.text || ''), store.projects().map(p => ({ id: p.id, name: p.name }))));
+      }
+      if (id === 'runs' && parts[2] && m === 'GET') { const r = workflows.run(parts[2]); return r ? send(res, 200, workflows.view(r)) : send(res, 404, { error: 'اجرا پیدا نشد' }); }
+      if (id === 'runs' && parts[2] && parts[3] && m === 'POST') {
+        const act = parts[3];
+        if (act === 'answer') return send(res, 200, workflows.answer(parts[2], body.value));
+        if (act === 'pause') return send(res, 200, workflows.pause(parts[2]));
+        if (act === 'resume') return send(res, 200, workflows.resume(parts[2]));
+        if (act === 'stop') return send(res, 200, workflows.stop(parts[2]));
+      }
+      const w = workflows.get(id);
+      if (!w) return send(res, 404, { error: 'ورک‌فلو پیدا نشد' });
+      if (!parts[2] && m === 'GET') return send(res, 200, { ...w, runs: workflows.runsOf(id).map(r => workflows.view(r)) });
+      if (!parts[2] && m === 'DELETE') { workflows.remove(id); broadcast({ type: 'workflows' }); return send(res, 200, { ok: true }); }
+      if (parts[2] === 'run' && m === 'POST') return send(res, 200, workflows.view(workflows.start(id, body.input)));
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
   // ---- Command Center: real system, network, weather, agents, models and tasks ----
   if (parts[0] === 'cc') {
     try {
@@ -1080,6 +1151,7 @@ function stopAll() {
   for (const id of [...previews.keys()]) stopPreview(id);
   speech.stop(); // the resident whisper server
   for (const id of [...talks.running.keys()]) talks.stop(id);
+  for (const id of [...workflows.live.keys()]) { try { workflows.pause(id); } catch {} }
   bot.stop();
   talks.flush();
   store.flush();
