@@ -149,3 +149,61 @@ body.has-rail #btnOps, body.has-rail #btnExt { display: none; }
 }
 /* the status under "JARVIS" sits on the orb: give it its own background so it stays readable */
 .cc-core-label span { padding: 2px 10px; border-radius: 999px; background: color-mix(in srgb, var(--color-bg) 70%, transparent); backdrop-filter: blur(4px); }
+
+/* ================= JARVIS HUD styling (colours from the active look) ================= */
+.cc-view { position: relative; }
+.cc-view::before { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background: repeating-linear-gradient(0deg, transparent 0 3px, color-mix(in srgb, var(--color-primary) 3%, transparent) 3px 4px); }
+.cc-view::after { content: ''; position: fixed; left: 0; right: 0; height: 120px; top: -120px; pointer-events: none; z-index: 0;
+  background: linear-gradient(transparent, color-mix(in srgb, var(--color-primary) 7%, transparent), transparent); animation: hudScan 9s linear infinite; }
+@keyframes hudScan { to { transform: translateY(calc(100vh + 120px)); } }
+.cc-grid { position: relative; z-index: 1; counter-reset: hud; }
+
+/* cards: HUD frames with corner brackets and a code tag */
+.cc-card { border-radius: 3px; border-color: color-mix(in srgb, var(--color-primary) 22%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-primary) 6%, transparent), transparent 40%), color-mix(in srgb, var(--color-surface-1) 82%, transparent);
+  box-shadow: inset 0 0 22px color-mix(in srgb, var(--color-primary) 6%, transparent); }
+.cc-card::before { width: 64px; height: 2px; top: -1px; box-shadow: 0 0 10px var(--color-primary); }
+.cc-card::after { content: ''; position: absolute; inset: -1px; pointer-events: none; opacity: .9;
+  --b: var(--color-primary);
+  background:
+    linear-gradient(var(--b), var(--b)) top left / 12px 1.5px no-repeat, linear-gradient(var(--b), var(--b)) top left / 1.5px 12px no-repeat,
+    linear-gradient(var(--b), var(--b)) top right / 12px 1.5px no-repeat, linear-gradient(var(--b), var(--b)) top right / 1.5px 12px no-repeat,
+    linear-gradient(var(--b), var(--b)) bottom left / 12px 1.5px no-repeat, linear-gradient(var(--b), var(--b)) bottom left / 1.5px 12px no-repeat,
+    linear-gradient(var(--b), var(--b)) bottom right / 12px 1.5px no-repeat, linear-gradient(var(--b), var(--b)) bottom right / 1.5px 12px no-repeat; }
+.cc-card { counter-increment: hud; }
+.cc-card h3 { color: var(--color-primary); font-size: 12.5px; letter-spacing: 0; }
+.cc-card h3 .ic { opacity: .9; }
+.cc-card h3[data-code]::before { content: attr(data-code) "-0" counter(hud); order: -1; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .08em; direction: ltr;
+  padding: 1px 6px; border: 1px solid color-mix(in srgb, var(--color-grad-b) 55%, transparent); color: var(--color-grad-b); border-radius: 2px; }
+.cc-list li, .cc-llm, .cc-zone, .cc-days > div, .cc-quick-list button { border-radius: 2px; border: 1px solid color-mix(in srgb, var(--color-primary) 10%, transparent); }
+.cc-quick-list button:hover { box-shadow: 0 0 14px color-mix(in srgb, var(--color-primary) 25%, transparent); }
+
+/* gauges: tick scale + glow */
+.cc-gauge .g-ticks { fill: none; stroke: color-mix(in srgb, var(--color-primary) 45%, transparent); stroke-width: 2.5; stroke-dasharray: 1 3.2; }
+.cc-gauge .g-bg { stroke: color-mix(in srgb, var(--color-primary) 12%, transparent); stroke-width: 5; }
+.cc-gauge .g-fg { stroke-width: 5; stroke-linecap: butt; }
+.cc-gauge .g-val { font-family: var(--font-mono); color: var(--color-primary); text-shadow: 0 0 8px color-mix(in srgb, var(--color-primary) 60%, transparent); }
+
+/* header + clock */
+.cc-top { border-bottom-color: color-mix(in srgb, var(--color-primary) 25%, transparent); position: relative; }
+.cc-top::after { content: ''; position: absolute; bottom: -1px; inset-inline-start: 0; width: 160px; height: 2px; background: var(--color-primary); box-shadow: 0 0 10px var(--color-primary); }
+.cc-clock { font-family: var(--font-mono); font-weight: 500; letter-spacing: .08em; }
+.cc-hello { letter-spacing: .02em; }
+
+/* core: the HUD canvas, label below it */
+.cc-orb { width: min(100%, 470px); }
+.cc-orb::after { display: none; }
+.cc-orb canvas { width: 100% !important; height: 100% !important; }
+.cc-core-label { position: static; transform: none; margin-top: -6px; }
+.cc-core-label b { font-family: var(--font-mono); font-size: 20px; letter-spacing: .6em; padding-inline-start: .6em; }
+.cc-core-label span { background: none; backdrop-filter: none; letter-spacing: 0; }
+.cc-talk { border-radius: 3px; font-family: inherit; }
+.cc-cmd input, .cc-cmd .btn { border-radius: 3px; }
+.cc-reply { border-radius: 3px; border-color: color-mix(in srgb, var(--color-primary) 25%, transparent); }
+
+/* rail in HUD style */
+.rail-btn { border-radius: 3px; }
+.rail-btn.on { box-shadow: inset 0 0 12px color-mix(in srgb, var(--color-primary) 25%, transparent); }
+@media (prefers-reduced-motion: reduce) { .cc-view::after { animation: none; display: none; } }
+.cc-addtask input { background: var(--color-surface-inset); border: 1px solid color-mix(in srgb, var(--color-primary) 20%, transparent); border-radius: 2px; color: var(--color-fg); padding: 6px 10px; }

@@ -8,7 +8,7 @@
 <!-- Everything is local: fonts, icons and three.js are bundled; no network requests. -->
 <script>
   // Apply the saved theme before first paint (no flash).
-  try { const k = localStorage.getItem('jarvis.skin'); if (k && /^[a-z]{2,12}$/.test(k) && k !== 'holo') document.documentElement.dataset.skin = k; } catch {}
+  try { const k = localStorage.getItem('jarvis.skin') || 'jarvis'; if (k && /^[a-z]{2,12}$/.test(k) && k !== 'holo') document.documentElement.dataset.skin = k; } catch {}
   try { let t = localStorage.getItem('jarvis.theme'); if (t === 'system') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch {}
 </script>
 <link rel="stylesheet" href="tokens.css">

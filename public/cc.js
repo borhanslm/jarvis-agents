@@ -1,6 +1,6 @@
 // Command Center: the start screen. A section rail on the side, a live AI core in the middle
 // and cards with REAL data only (system, network, weather, world clocks, agents, models, tasks).
-import * as THREE from 'three';
+import { makeHud } from './hud.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -76,9 +76,9 @@ function renderShell() {
       <div class="cc-clock" id="ccClock" dir="ltr"></div>
     </header>
 
-    <section class="cc-card cc-sys" aria-label="وضعیت سیستم"><h3>${ic('cpu', 'sm')}سیستم</h3><div class="cc-gauges" id="ccGauges"></div><div class="cc-sub" id="ccSysSub"></div></section>
-    <section class="cc-card cc-net" aria-label="اینترنت"><h3>${ic('wifi', 'sm')}اینترنت</h3><div id="ccNet" class="cc-net-body"></div></section>
-    <section class="cc-card cc-weather" aria-label="آب‌وهوا"><h3>${ic('cloud-sun', 'sm')}آب‌وهوا <button type="button" class="cc-mini" id="ccCity" title="انتخاب شهر">${ic('map-pin', 'sm')}</button></h3><div id="ccWeather"></div></section>
+    <section class="cc-card cc-sys" aria-label="وضعیت سیستم" data-code="SYS"><h3>${ic('cpu', 'sm')}سیستم</h3><div class="cc-gauges" id="ccGauges"></div><div class="cc-sub" id="ccSysSub"></div></section>
+    <section class="cc-card cc-net" aria-label="اینترنت" data-code="NET"><h3>${ic('wifi', 'sm')}اینترنت</h3><div id="ccNet" class="cc-net-body"></div></section>
+    <section class="cc-card cc-weather" aria-label="آب‌وهوا" data-code="ENV"><h3>${ic('cloud-sun', 'sm')}آب‌وهوا <button type="button" class="cc-mini" id="ccCity" title="انتخاب شهر">${ic('map-pin', 'sm')}</button></h3><div id="ccWeather"></div></section>
 
     <section class="cc-core" aria-label="هسته‌ی جارویس">
       <div class="cc-orb" id="ccOrb"></div>
@@ -88,12 +88,12 @@ function renderShell() {
       <div class="cc-reply" id="ccReply" dir="auto" hidden></div>
     </section>
 
-    <section class="cc-card cc-agents" aria-label="ایجنت‌های فعال"><h3>${ic('bot', 'sm')}ایجنت‌های فعال <button type="button" class="cc-mini" id="ccOps" title="اتاق عملیات">${ic('radar', 'sm')}</button></h3><div id="ccAgents"></div></section>
-    <section class="cc-card cc-llms" aria-label="مدل‌های هوش مصنوعی"><h3>${ic('brain', 'sm')}هسته‌ی هوش مصنوعی</h3><div id="ccLlms" class="cc-llm-list"></div></section>
-    <section class="cc-card cc-tasks" aria-label="تسک‌های امروز"><h3>${ic('list-checks', 'sm')}تسک‌های امروز <button type="button" class="cc-mini" id="ccAllTasks" title="همه‌ی تسک‌ها">${ic('maximize-2', 'sm')}</button></h3>
+    <section class="cc-card cc-agents" aria-label="ایجنت‌های فعال" data-code="AGT"><h3>${ic('bot', 'sm')}ایجنت‌های فعال <button type="button" class="cc-mini" id="ccOps" title="اتاق عملیات">${ic('radar', 'sm')}</button></h3><div id="ccAgents"></div></section>
+    <section class="cc-card cc-llms" aria-label="مدل‌های هوش مصنوعی" data-code="CORE"><h3>${ic('brain', 'sm')}هسته‌ی هوش مصنوعی</h3><div id="ccLlms" class="cc-llm-list"></div></section>
+    <section class="cc-card cc-tasks" aria-label="تسک‌های امروز" data-code="TSK"><h3>${ic('list-checks', 'sm')}تسک‌های امروز <button type="button" class="cc-mini" id="ccAllTasks" title="همه‌ی تسک‌ها">${ic('maximize-2', 'sm')}</button></h3>
       <div id="ccTasks"></div><form class="cc-addtask" id="ccAddTask" autocomplete="off"><input id="ccTaskIn" dir="auto" placeholder="تسک تازه…"><button class="cc-mini" type="submit" title="افزودن">${ic('plus', 'sm')}</button></form></section>
-    <section class="cc-card cc-clocks" aria-label="ساعت جهانی"><h3>${ic('globe', 'sm')}ساعت جهانی <button type="button" class="cc-mini" id="ccEditClocks" title="تغییر شهرها">${ic('pencil', 'sm')}</button></h3><div id="ccClocks" class="cc-clock-list"></div></section>
-    <section class="cc-card cc-quick" aria-label="کارهای سریع"><h3>${ic('zap', 'sm')}کارهای سریع</h3><div class="cc-quick-list">
+    <section class="cc-card cc-clocks" aria-label="ساعت جهانی" data-code="UTC"><h3>${ic('globe', 'sm')}ساعت جهانی <button type="button" class="cc-mini" id="ccEditClocks" title="تغییر شهرها">${ic('pencil', 'sm')}</button></h3><div id="ccClocks" class="cc-clock-list"></div></section>
+    <section class="cc-card cc-quick" aria-label="کارهای سریع" data-code="CMD"><h3>${ic('zap', 'sm')}کارهای سریع</h3><div class="cc-quick-list">
       <button type="button" data-q="code">${ic('code')}<span>کار تازه با تیم</span></button>
       <button type="button" data-q="queue">${ic('clock')}<span>صف کارها</span></button>
       <button type="button" data-q="ext">${ic('puzzle')}<span>اتصال‌ها</span></button>
@@ -119,6 +119,7 @@ function renderShell() {
     } catch (err) { out.textContent = err.message; }
   };
   v.querySelector('#ccReply').onclick = async e => { const b = e.target.closest('[data-yes]'); if (!b) return; try { await api('/voice/confirm', { body: { yes: b.dataset.yes === '1' } }); $('#ccReply').textContent = b.dataset.yes === '1' ? 'انجام شد.' : 'لغو شد.'; refresh(); } catch (err) { window.toast(err.message, true); } };
+  v.querySelectorAll('.cc-card[data-code]').forEach(s => { s.querySelector('h3').dataset.code = s.dataset.code; });
   core = makeCore($('#ccOrb'));
 }
 
@@ -132,7 +133,7 @@ async function refresh() {
 function gauge(label, pct, sub) {
   const p = pct == null ? 0 : Math.max(0, Math.min(100, pct));
   const r = 30, c = 2 * Math.PI * r, warn = p >= 90 ? 'bad' : p >= 75 ? 'warn' : '';
-  return `<div class="cc-gauge ${warn}"><svg viewBox="0 0 76 76" aria-hidden="true"><circle class="g-bg" cx="38" cy="38" r="${r}"/><circle class="g-fg" cx="38" cy="38" r="${r}" stroke-dasharray="${(c * p / 100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 38 38)"/></svg>
+  return `<div class="cc-gauge ${warn}"><svg viewBox="0 0 76 76" aria-hidden="true"><circle class="g-ticks" cx="38" cy="38" r="36.5"/><circle class="g-bg" cx="38" cy="38" r="${r}"/><circle class="g-fg" cx="38" cy="38" r="${r}" stroke-dasharray="${(c * p / 100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 38 38)"/></svg>
     <div class="g-val">${pct == null ? '—' : faN(Math.round(p)) + '٪'}</div><div class="g-lbl">${label}</div><div class="g-sub" dir="auto">${sub || ''}</div></div>`;
 }
 function render(d) {
@@ -168,7 +169,7 @@ function render(d) {
 
   const working = run.length > 0;
   $('#ccCoreState').textContent = working ? faN(run.length) + ' کار در حال انجام' : n.online ? 'همه‌ی سیستم‌ها آماده' : 'آفلاین — آماده با اجزای محلی';
-  if (core) core.setBusy(working);
+  if (core) { core.setBusy(working); core.setNet(!!n.online); }
   renderClocks(d.clocks);
 }
 const STATUS_FA = { running: 'در حال کار', building: 'در حال ساخت', reviewing: 'در حال تست', waiting: 'منتظر', fixing: 'در حال رفع' };
@@ -253,59 +254,15 @@ async function tasksDialog() {
 }
 window.tasksDialog = tasksDialog;
 
-// ---------- the AI core (three.js) ----------
+// ---------- the AI core (HUD canvas, hud.js) ----------
 let core = null;
 function makeCore(host) {
   if (!host) return null;
-  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let renderer;
-  try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); } catch { host.classList.add('no-gl'); return null; }
-  renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
-  host.appendChild(renderer.domElement);
-  const scene = new THREE.Scene();
-  const cam = new THREE.PerspectiveCamera(40, 1, 0.1, 100); cam.position.set(0, 0, 7.2);
-  const group = new THREE.Group(); scene.add(group);
-  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || '#4fd1ff';
-  let mats = [];
-  function build() {
-    group.clear(); mats.forEach(m => m.dispose()); mats = [];
-    const pri = new THREE.Color(css('--color-primary')), acc = new THREE.Color(css('--color-info') || css('--color-primary'));
-    const wire = new THREE.MeshBasicMaterial({ color: pri, wireframe: true, transparent: true, opacity: 0.55 });
-    const inner = new THREE.MeshBasicMaterial({ color: pri, transparent: true, opacity: 0.16 });
-    const ring = new THREE.MeshBasicMaterial({ color: acc, transparent: true, opacity: 0.7, side: THREE.DoubleSide });
-    const pts = new THREE.PointsMaterial({ color: acc, size: 0.035, transparent: true, opacity: 0.8 });
-    mats.push(wire, inner, ring, pts);
-    group.add(new THREE.Mesh(new THREE.IcosahedronGeometry(1.55, 2), wire));
-    group.add(new THREE.Mesh(new THREE.SphereGeometry(1.05, 32, 32), inner));
-    const r1 = new THREE.Mesh(new THREE.TorusGeometry(2.3, 0.012, 8, 160), ring); r1.rotation.x = Math.PI / 2.3; group.add(r1);
-    const r2 = new THREE.Mesh(new THREE.TorusGeometry(2.65, 0.008, 8, 160), ring); r2.rotation.x = Math.PI / 1.8; r2.rotation.y = 0.5; group.add(r2);
-    const g = new THREE.BufferGeometry(); const N = 700; const p = new Float32Array(N * 3);
-    for (let i = 0; i < N; i++) { const a = Math.random() * Math.PI * 2, rr = 2.0 + Math.random() * 1.1, y = (Math.random() - 0.5) * 0.5; p[i * 3] = Math.cos(a) * rr; p[i * 3 + 1] = y; p[i * 3 + 2] = Math.sin(a) * rr; }
-    g.setAttribute('position', new THREE.BufferAttribute(p, 3));
-    const cloud = new THREE.Points(g, pts); cloud.rotation.x = 0.35; group.add(cloud);
-    group.userData = { r1, r2, cloud };
-  }
-  build();
-  new MutationObserver(build).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-skin', 'class'] });
-  function size() { const w = host.clientWidth || 300, h = host.clientHeight || 300; renderer.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); }
-  new ResizeObserver(size).observe(host); size();
-  let busy = false, raf = 0, t = 0, running = true;
-  function frame() {
-    raf = requestAnimationFrame(frame);
-    if (document.hidden) return;
-    const sp = reduce ? 0 : busy ? 2.2 : 1;
-    t += 0.008 * sp;
-    group.rotation.y = t * 0.6;
-    const u = group.userData; if (u.r1) { u.r1.rotation.z = t * 1.3; u.r2.rotation.z = -t; u.cloud.rotation.y = -t * 0.8; }
-    const s = 1 + (reduce ? 0 : Math.sin(t * (busy ? 6 : 3)) * 0.025); group.scale.setScalar(s);
-    renderer.render(scene, cam);
-  }
-  frame();
-  return {
-    setBusy(b) { busy = b; host.classList.toggle('busy', b); },
-    pause() { if (running) { cancelAnimationFrame(raf); running = false; } },
-    resume() { if (!running) { running = true; frame(); } },
-  };
+  const h = makeHud(host);
+  // follow the voice assistant: listening / thinking / speaking
+  const watch = () => { const d = document.getElementById('voiceDock'); if (!d) return setTimeout(watch, 1500); new MutationObserver(() => h.setMode(d.hidden ? 'idle' : d.dataset.state)).observe(d, { attributes: true, attributeFilter: ['data-state', 'hidden'] }); };
+  watch();
+  return h;
 }
 
 // ---------- start ----------
