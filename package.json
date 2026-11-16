@@ -23,7 +23,7 @@
   "license": "MIT",
   "jarvis": {
     "allowClaudeAiLogin": false,
-    "clubUrl": "https://jarvis-club.borhans-mohammadi.workers.dev"
+    "clubUrl": "https://club.maxping.ir"
   },
   "devDependencies": {
     "electron": "^33.2.1",
