@@ -357,6 +357,12 @@ function buildReview(m, who) {
 
 // ---------- data flow ----------
 async function loadState() {
+  // members club: nothing loads until the person has signed in (the sign-in screen is drawn by pages/club.js)
+  for (;;) {
+    let c = null; try { c = await api('/club'); } catch {}
+    if (!c || !c.required || c.loggedIn) break;
+    await new Promise(r => setTimeout(r, 1500));
+  }
   const s = await api('/state');
   Object.assign(S, { skills: s.skills || [], defaults: s.defaults || {}, queue: s.queues || {}, subagents: s.subagents || [], projects: s.projects, settings: s.settings, agents: s.agents, versions: s.versions, clis: s.clis, codexDefaultModel: s.codexDefaultModel, claudeAuth: s.claudeAuth || null, providers: s.providers || [], providerPresets: s.providerPresets || [], modelCatalog: (s.modelCatalog && s.modelCatalog.claude) || [] });
   if (S.projectId && !S.projects.some(p => p.id === S.projectId)) S.projectId = null;

@@ -470,3 +470,18 @@ body.on-jarvis .topbar { display: none !important; }
 .jvs-row progress { width: 120px; }
 @media (max-width: 760px) { .jvs-2 { grid-template-columns: 1fr; } .jv-drawer { inset-inline: 10px; width: auto; } }
 @media (prefers-reduced-motion: reduce) { .jv-drawer, .jvs { animation: none; } }
+/* sales: purchase requests first */
+.sl-purch { margin-bottom: 18px; border-color: color-mix(in srgb, var(--color-primary) 35%, transparent); }
+.sl-purch h2 { display: flex; align-items: center; gap: 8px; }
+.sl-count { color: var(--color-primary); border-color: var(--color-primary-line); }
+.sl-empty { display: flex; gap: 8px; align-items: center; padding: 14px; border-radius: 4px; background: var(--color-surface-inset); color: var(--color-fg-muted); }
+.sl-plist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.sl-plist li { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 12px 14px; border-radius: 6px; background: var(--color-surface-inset); border: 1px solid var(--color-border-subtle); }
+.sl-pinfo { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 4px; }
+.sl-pmeta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--color-fg-muted); }
+.sl-pmeta b { color: var(--color-fg-strong); }
+.sl-pact { display: flex; gap: 8px; }
+.sl-pact .btn { min-height: 42px; }
+.sl-adv { margin: 8px 0 20px; }
+.sl-adv > summary { cursor: pointer; display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 4px; border: 1px solid var(--color-border); color: var(--color-fg-muted); list-style: none; }
+.sl-adv[open] > summary { margin-bottom: 12px; color: var(--color-primary); }

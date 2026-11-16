@@ -234,7 +234,7 @@ setInterval(() => { try { workflows.tick(); } catch (e) { console.error('workflo
 const agentKit = require('./lib/agent-kit');
 // ---- the members club (required when a club address is set) ----
 const clubLib = require('./lib/club');
-const club = new clubLib.Club({ dataDir: DATA, secrets: setup.secrets, settings: () => store.settings(), defaultUrl: ((require('./package.json').jarvis || {}).clubUrl) || '' });
+const club = new clubLib.Club({ dataDir: DATA, secrets: setup.secrets, settings: () => store.settings(), defaultUrl: process.env.JARVIS_CLUB_URL !== undefined ? process.env.JARVIS_CLUB_URL : ((require('./package.json').jarvis || {}).clubUrl) || '' }); // the env var is for tests
 const clubView = () => ({ ...club.state(), deploy: clubDeploy, cfLogin: clubLogin });
 // admin-only things (selling, license keys, club setup): with a club only its admins; without one, the local owner
 const clubAdmin = () => { const st = club.state(); return !st.required || !!(st.loggedIn && st.user && st.user.role === 'admin'); };
@@ -680,6 +680,8 @@ async function api(req, res, url) {
   const m = req.method;
   const body = m === 'POST' || m === 'PUT' || ((m === 'PATCH' || m === 'DELETE') && url.pathname.startsWith('/api/club/')) ? await readBody(req) : null;
 
+  // members club: until the person signs in, only the sign-in itself answers (no data, no actions)
+  if (parts[0] !== 'club') { const cst = club.state(); if (cst.required && !cst.loggedIn) return send(res, 403, { error: 'اول وارد حساب باشگاه جارویس شوید', clubLogin: true }); }
   if (parts[0] === 'events' && m === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
     res.write(`data: ${JSON.stringify({ type: 'hello' })}\n\n`);
@@ -986,6 +988,31 @@ async function api(req, res, url) {
         let published = null; if (s.sellRepo) { try { published = await publishLicenses(); } catch (e) { published = { ok: false, error: e.message }; } }
         const member = await clubLicense(sale);
         return send(res, 200, { ...sale, previousForContact: before.length, published, member });
+      }
+      // ---- purchase requests from the app (the buyer paid card to card and sent the tracking number) ----
+      if (parts[1] === 'purchases' && m === 'GET') {
+        if (!club.url() || !club.token()) return send(res, 200, { purchases: [], noClub: true });
+        // keep the buy screen in the app up to date with the price and card number
+        club.call('POST', '/api/admin/shop', { price: s.sellPrice, currency: s.sellCurrency, card: s.sellCard, holder: s.sellHolder, note: s.sellNote, contact: s.sellContact }).catch(() => {});
+        const st = ['pending', 'approved', 'rejected'].includes(url.searchParams.get('status')) ? url.searchParams.get('status') : 'pending';
+        return send(res, 200, await club.call('GET', '/api/admin/purchases?status=' + st));
+      }
+      if ((parts[1] === 'approve' || parts[1] === 'reject') && parts[2] && m === 'POST') {
+        const list = (await club.call('GET', '/api/admin/purchases?status=pending')).purchases;
+        const p = list.find(x => x.id === parts[2]); if (!p) throw new Error('این درخواست دیگر در انتظار نیست');
+        if (parts[1] === 'reject') { await club.call('PATCH', '/api/admin/purchases/' + p.id, { status: 'rejected', reason: String(body.reason || 'پرداخت پیدا نشد').slice(0, 200) }); return send(res, 200, { ok: true }); }
+        if (!setup.secrets.get('sellerPrivateKey')) throw new Error('اول «کلید امضای فروش» را بسازید');
+        // one click: license for the buyer's phone -> into their club account -> the app activates itself
+        const r = license.issue({ privateKey: setup.secrets.get('sellerPrivateKey'), device: p.device, buyer: '' });
+        const code = license.shortCode();
+        const sale = { id: r.payload.id, code, codeHash: license.codeHash(code), device: r.payload.d, buyer: String(p.userName || '').slice(0, 40), contact: p.userEmail, amount: Math.max(0, +String(p.amount || s.sellPrice || '').replace(/\D/g, '') || 0),
+          note: `پیگیری ${p.ref}${p.card4 ? ' · کارت ' + p.card4 : ''}`, kind: 'sale', issuedAt: Date.now(), updatesUntil: r.payload.u * 864e5, key: r.key, memberEmail: String(p.userEmail || '').toLowerCase(), purchaseId: p.id };
+        const sales = readSales(); sales.push(sale); writeSales(sales);
+        const member = await clubLicense(sale);
+        if (!member || !member.ok) throw new Error('لایسنس ساخته شد ولی به حساب خریدار نرسید: ' + ((member && member.error) || 'باشگاه در دسترس نیست') + ' — از فهرست فروش‌ها کلید را دستی بفرستید.');
+        await club.call('PATCH', '/api/admin/purchases/' + p.id, { status: 'approved', licenseId: sale.id });
+        if (s.sellRepo) publishLicenses().catch(() => {});
+        return send(res, 200, { ok: true, sale, view: sellerView() });
       }
       if (parts[1] === 'verify' && m === 'POST') { const v = license.verify(body.key, s.sellerPublicKey, body.device || null); return send(res, 200, { ...v, message: v.ok ? 'معتبر است' : license.REASON_FA[v.reason] }); }
       if (parts[1] === 'publish' && m === 'POST') { if (typeof body.repo === 'string') store.updateSettings({ sellRepo: body.repo.trim() }); return send(res, 200, { ...(await publishLicenses()), view: sellerView() }); }

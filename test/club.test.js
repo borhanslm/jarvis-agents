@@ -107,6 +107,29 @@ test('club service', async t => {
     assert.equal((await call('GET', '/api/admin/tickets?status=open', null, admin.token)).d.tickets.length, 0);
   });
 
+  await t.test('buying: shop info, purchase request, admin approves or rejects', async () => {
+    assert.equal((await call('POST', '/api/admin/shop', { price: '490000', card: '6037991122334455', holder: 'فروشنده' }, user.token)).status, 403, 'only the admin sets the shop');
+    await call('POST', '/api/admin/shop', { price: '490000', currency: 'تومان', card: '6037991122334455', holder: 'فروشنده' }, admin.token);
+    const shop = await call('GET', '/api/shop', null, user.token);
+    assert.equal(shop.d.price, '490000'); assert.equal(shop.d.holder, 'فروشنده');
+    assert.equal((await call('GET', '/api/shop')).status, 401, 'members only');
+    assert.equal((await call('POST', '/api/purchases', { device: 'bad', ref: '123456' }, user.token)).status, 400);
+    assert.equal((await call('POST', '/api/purchases', { device: 'ABCD-EFGH-JKLM', ref: '۱۲' }, user.token)).status, 400, 'tracking number too short');
+    const pr = await call('POST', '/api/purchases', { device: 'abcd-efgh-jkLm', ref: '۱۲۳۴۵۶۷۸', card4: '9876' }, user.token);
+    assert.equal(pr.status, 200);
+    let mine = (await call('GET', '/api/purchases', null, user.token)).d.purchases;
+    assert.equal(mine[0].status, 'pending'); assert.equal(mine[0].ref, '12345678'); assert.equal(mine[0].device, 'ABCD-EFGH-JKLM');
+    const pend = (await call('GET', '/api/admin/purchases?status=pending', null, admin.token)).d.purchases;
+    assert.equal(pend.length, 1); assert.equal(pend[0].userEmail, 'ali@example.com');
+    assert.equal((await call('GET', '/api/admin/stats', null, admin.token)).d.pendingPurchases, 1);
+    assert.equal((await call('PATCH', '/api/admin/purchases/' + pend[0].id, { status: 'approved' }, user.token)).status, 403);
+    await call('PATCH', '/api/admin/purchases/' + pend[0].id, { status: 'rejected', reason: 'پیدا نشد' }, admin.token);
+    mine = (await call('GET', '/api/purchases', null, user.token)).d.purchases;
+    assert.equal(mine[0].status, 'rejected'); assert.equal(mine[0].reason, 'پیدا نشد');
+    for (let i = 0; i < 3; i++) await call('POST', '/api/purchases', { device: 'ABCD-EFGH-JKLM', ref: '99999' + i }, user.token);
+    assert.equal((await call('POST', '/api/purchases', { device: 'ABCD-EFGH-JKLM', ref: '777777' }, user.token)).status, 429, 'at most three waiting');
+  });
+
   await t.test('admin: stats, search, promote, block (ends sessions), delete', async () => {
     const st = await call('GET', '/api/admin/stats', null, admin.token);
     assert.equal(st.d.users, 3); assert.equal(st.d.admins, 1); assert.equal(st.d.active7, 3); assert.equal(st.d.android, 0, 'Ali last used the desktop');

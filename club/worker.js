@@ -19,8 +19,13 @@ export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, from_admin INTEGER NOT NULL, body TEXT NOT NULL, created INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS messages_ticket ON messages(ticket_id)`,
   `CREATE TABLE IF NOT EXISTS throttle (k TEXT PRIMARY KEY, n INTEGER NOT NULL, until INTEGER NOT NULL)`,
+  // buying the Android app: the buyer pays card to card and sends the tracking number; the admin approves in JARVIS
+  `CREATE TABLE IF NOT EXISTS purchases (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, device TEXT NOT NULL, ref TEXT NOT NULL, card4 TEXT, amount TEXT, note TEXT,
+     status TEXT NOT NULL DEFAULT 'pending', reason TEXT, license_id TEXT, created INTEGER NOT NULL, decided INTEGER)`,
+  `CREATE INDEX IF NOT EXISTS purchases_status ON purchases(status)`,
+  `CREATE TABLE IF NOT EXISTS shop (k TEXT PRIMARY KEY, v TEXT NOT NULL)`,
 ];
-export const VERSION = 1;
+export const VERSION = 2;
 const DAY = 864e5;
 const SESSION_DAYS = 180;
 const ITER = 100000; // the Workers PBKDF2 maximum
@@ -180,6 +185,7 @@ async function removeUser(db, id) {
     db.prepare('DELETE FROM messages WHERE ticket_id IN (SELECT id FROM tickets WHERE user_id = ?)').bind(id),
     db.prepare('DELETE FROM tickets WHERE user_id = ?').bind(id),
     db.prepare('DELETE FROM licenses WHERE user_id = ?').bind(id),
+    db.prepare('DELETE FROM purchases WHERE user_id = ?').bind(id),
     db.prepare('DELETE FROM users WHERE id = ?').bind(id),
   ]);
 }
@@ -230,6 +236,57 @@ route('POST', '/api/tickets/:id', async ({ db, req, p, b }) => {
   return { ok: true };
 });
 
+// ---- buying the Android app ----
+const SHOP_KEYS = ['price', 'currency', 'card', 'holder', 'note', 'contact'];
+async function shopInfo(db) {
+  const r = (await db.prepare('SELECT k, v FROM shop').all()).results;
+  const o = Object.fromEntries(SHOP_KEYS.map(k => [k, '']));
+  for (const x of r) if (SHOP_KEYS.includes(x.k)) o[x.k] = x.v;
+  return o;
+}
+const purchaseOut = p => ({ id: p.id, device: p.device, ref: p.ref, card4: p.card4 || '', amount: p.amount || '', note: p.note || '', status: p.status, reason: p.reason || '', created: p.created, decided: p.decided || null, userName: p.name, userEmail: p.email });
+// price and card number for the buy screen (members only)
+route('GET', '/api/shop', async ({ db, req }) => { await auth(db, req); return shopInfo(db); });
+route('POST', '/api/purchases', async ({ db, req, b }) => {
+  const { user } = await auth(db, req);
+  const device = String(b.device || '').toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 20);
+  if (!/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(device)) fail(400, 'کد دستگاه نامعتبر است');
+  const ref = faDigits(b.ref).replace(/[^\dA-Za-z]/g, '').slice(0, 30);
+  if (ref.length < 4) fail(400, 'شماره‌ی پیگیری را درست وارد کنید');
+  const card4 = faDigits(b.card4).replace(/\D/g, '').slice(-4);
+  const pending = (await db.prepare("SELECT COUNT(*) AS n FROM purchases WHERE user_id = ? AND status = 'pending'").bind(user.id).first()).n;
+  if (pending >= 3) fail(429, 'سه درخواست در انتظار دارید؛ صبر کنید تا بررسی شوند');
+  const id = newId();
+  await db.prepare('INSERT INTO purchases (id, user_id, device, ref, card4, amount, note, status, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(id, user.id, device, ref, card4 || null, String(b.amount || '').slice(0, 30) || null, String(b.note || '').slice(0, 300) || null, 'pending', Date.now()).run();
+  return { id, status: 'pending' };
+});
+route('GET', '/api/purchases', async ({ db, req }) => {
+  const { user } = await auth(db, req);
+  const r = await db.prepare('SELECT purchases.*, users.name, users.email FROM purchases JOIN users ON users.id = purchases.user_id WHERE purchases.user_id = ? ORDER BY purchases.created DESC LIMIT 20').bind(user.id).all();
+  return { purchases: r.results.map(purchaseOut) };
+});
+route('GET', '/api/admin/purchases', async ({ db, req, url }) => {
+  await auth(db, req, { admin: true });
+  const st = url.searchParams.get('status');
+  const r = await db.prepare(`SELECT purchases.*, users.name, users.email FROM purchases JOIN users ON users.id = purchases.user_id ${['pending', 'approved', 'rejected'].includes(st) ? 'WHERE purchases.status = ?' : 'WHERE ? = ?'} ORDER BY purchases.created DESC LIMIT 200`)
+    .bind(...(['pending', 'approved', 'rejected'].includes(st) ? [st] : [1, 1])).all();
+  return { purchases: r.results.map(purchaseOut) };
+});
+route('PATCH', '/api/admin/purchases/:id', async ({ db, req, p, b }) => {
+  await auth(db, req, { admin: true });
+  if (!['approved', 'rejected'].includes(b.status)) fail(400, 'وضعیت نامعتبر');
+  const x = await db.prepare('SELECT id FROM purchases WHERE id = ?').bind(p.id).first();
+  if (!x) fail(404, 'درخواست پیدا نشد');
+  await db.prepare('UPDATE purchases SET status = ?, reason = ?, license_id = ?, decided = ? WHERE id = ?').bind(b.status, String(b.reason || '').slice(0, 300) || null, b.licenseId ? String(b.licenseId).slice(0, 40) : null, Date.now(), p.id).run();
+  return { ok: true };
+});
+route('POST', '/api/admin/shop', async ({ db, req, b }) => {
+  await auth(db, req, { admin: true });
+  await db.batch(SHOP_KEYS.filter(k => b[k] != null).map(k => db.prepare('INSERT OR REPLACE INTO shop (k, v) VALUES (?, ?)').bind(k, String(b[k]).slice(0, 300))));
+  return shopInfo(db);
+});
+
 // ---- admin ----
 route('GET', '/api/admin/stats', async ({ db, req }) => {
   await auth(db, req, { admin: true });
@@ -245,6 +302,7 @@ route('GET', '/api/admin/stats', async ({ db, req }) => {
     android: await n("SELECT COUNT(*) AS n FROM users WHERE client = 'android'"),
     openTickets: await n("SELECT COUNT(*) AS n FROM tickets WHERE status = 'open'"),
     unreadTickets: await n('SELECT COUNT(*) AS n FROM tickets WHERE admin_seen = 0'),
+    pendingPurchases: await n("SELECT COUNT(*) AS n FROM purchases WHERE status = 'pending'"),
   };
 });
 route('GET', '/api/admin/users', async ({ db, req, url }) => {

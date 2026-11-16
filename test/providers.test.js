@@ -120,7 +120,7 @@ test('full connection trial runs the real CLI as builder and reviewer', { timeou
   await new Promise(r => srv.listen(0, '127.0.0.1', r));
   const { spawn } = require('child_process');
   const data = tmp('jarvis-trial-srv-');
-  const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, JARVIS_PORT: '0', JARVIS_DATA: data }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, JARVIS_PORT: '0', JARVIS_DATA: data, JARVIS_CLUB_URL: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     const port = await new Promise((res, rej) => { let out = ''; const t = setTimeout(() => rej(new Error(out)), 15000); child.stdout.on('data', d => { out += d; const m = out.match(/localhost:(\d+)\//); if (m) { clearTimeout(t); res(+m[1]); } }); });
     const call = (p, body) => fetch(`http://127.0.0.1:${port}/api${p}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis': '1' }, body: JSON.stringify(body) }).then(r => r.json());
