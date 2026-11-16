@@ -36,6 +36,14 @@ test('folders: only known folders or existing absolute paths', () => {
   assert.throws(() => pc.folderPath('C:\\no\\such\\folder'));
 });
 
+test('brain: phone actions only for requests from the phone', () => {
+  const reply = '{"say":"باشه","action":{"type":"phone_sms","params":{"code":true}}}';
+  assert.equal(parseReply(reply).action, null, 'from the computer: no phone actions');
+  assert.equal(parseReply(reply, { phone: true }).action.type, 'phone_sms');
+  const { PHONE_ACTIONS } = require('../lib/voice/brain');
+  assert.ok(PHONE_ACTIONS.phone_do && PHONE_ACTIONS.phone_sms_send && PHONE_ACTIONS.phone_call);
+});
+
 test('brain: computer actions are understood; shut down needs a yes, lock does not', () => {
   const r = parseReply('{"say":"باشه","action":{"type":"open_app","params":{"name":"Google Chrome"}}}');
   assert.equal(r.action.type, 'open_app');

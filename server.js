@@ -421,6 +421,8 @@ async function voiceAct(a) {
   }
   if (a.type === 'add_task') { const d = p.due ? Date.parse(p.due) : NaN; const t = tasks.add({ title: p.title, due: Number.isFinite(d) ? new Date(d).toISOString() : null, priority: p.priority, category: p.category, repeat: p.repeat, remindBefore: p.remindBefore }, 'voice'); return { ok: true, task: t }; }
   if (a.type === 'complete_task') { const t = tasks.get(String(p.id || '')); if (!t) return { ok: false, error: 'تسک پیدا نشد' }; tasks.complete(t.id); return { ok: true, task: t }; }
+  // done by the phone itself (the Android app runs these and asks before sending or calling)
+  if (/^phone_/.test(a.type)) return { ok: true, phone: true };
   // the computer: programs, websites, folders, volume, power (lib/pc.js)
   if (['open_app', 'open_url', 'web_search', 'open_folder', 'volume', 'media', 'screenshot', 'close_app', 'power'].includes(a.type)) {
     try { return { ok: true, pc: await require('./lib/pc').run(a.type, p) }; } catch (e) { return { ok: false, error: e.message }; }
@@ -1145,17 +1147,24 @@ async function api(req, res, url) {
         let spec = on ? (s.voiceModel || 'claude-haiku-5-5') : off;
         if (!spec) throw new Error('اینترنت در دسترس نیست و مغز آفلاین انتخاب نشده. در تنظیمات صدا یک مدل Ollama انتخاب کنید.');
         let r;
-        try { r = await brain.handle(text, { spec }); }
+        try { r = await brain.handle(text, { spec, phone: !!body.phone }); }
         catch (e) {
           // the online model could not be reached: answer with the offline one (not when the user chose "online only")
           if (!on || s.voiceMode === 'online' || !off || !net.isNetError(e)) throw e;
-          net.markOffline(); spec = off; r = await brain.handle(text, { spec });
+          net.markOffline(); spec = off; r = await brain.handle(text, { spec, phone: !!body.phone });
         }
         r.brain = { spec, offline: spec === off };
         const result = r.confirm ? null : await voiceAct(r.action);
         voiceLog.push({ ts: Date.now(), user: text, say: r.say, action: r.action, confirm: r.confirm, result });
         if (voiceLog.length > 200) voiceLog.splice(0, voiceLog.length - 200);
         return send(res, 200, { ...r, result });
+      }
+      // the phone's app agent: one planning step with the voice model (reads a screen, picks the next tap)
+      if (parts[1] === 'plan' && m === 'POST') {
+        const on = await voiceOnline(s), spec = on ? (s.voiceModel || 'claude-haiku-5-5') : offlineSpec(s);
+        if (!spec) throw new Error('مدلی برای فکر کردن در دسترس نیست');
+        const r = await chatLLM({ spec, system: String(body.system || '').slice(0, 8000), messages: (Array.isArray(body.messages) ? body.messages : []).slice(-12).map(x => ({ role: x.role === 'assistant' ? 'assistant' : 'user', content: String(x.content || '').slice(0, 12000) })), maxTokens: 400, json: true });
+        return send(res, 200, { text: r.text });
       }
       if (parts[1] === 'confirm' && m === 'POST') {
         const a = brain.confirm(!!body.yes);
