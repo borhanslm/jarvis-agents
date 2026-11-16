@@ -38,6 +38,10 @@ window.jarvisVoice = {
   talk: () => { if (V.state === 'off') start(true); else if (V.state === 'recording') finishRecording(); else startRecording(false); },
   stopSpeaking: () => { stopSpeaking(); if (V.state === 'speaking') setState('idle'); },
   pause: () => pause(), resume: () => resume(),
+  get micFallback() { return !!V.micFallback; },
+  // after the settings change: reopen the microphone / reload the wake word
+  reloadMic: async () => { V.micFallback = false; if (V.stream) { stopMic(); try { await startMic(); } catch (e) { window.toast && window.toast(e.message, true); } } },
+  reloadWake: async () => { if (V.state === 'off') return; const st = await api('/voice/status'); V.localStt = st.stt.local; if (settings().voiceWake !== false && st.assets.wakeword.installed) await loadWakeWord(); },
 };
 const settings = () => S.settings || {};
 
@@ -47,7 +51,15 @@ const WORKLET = `class P extends AudioWorkletProcessor { process(i) { const c = 
 async function startMic() {
   if (V.stream) return;
   const id = settings().voiceMicId;
-  V.stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: id ? { exact: id } : undefined, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  const opts = dev => ({ audio: { deviceId: dev ? { exact: dev } : undefined, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  try { V.stream = await navigator.mediaDevices.getUserMedia(opts(id)); }
+  catch (e) {
+    // the chosen microphone is unplugged or Windows renamed it: use the default one instead of failing
+    if (!id || !['OverconstrainedError', 'NotFoundError', 'NotReadableError'].includes(e.name)) throw e;
+    V.stream = await navigator.mediaDevices.getUserMedia(opts(null));
+    V.micFallback = true;
+    window.toast && window.toast('میکروفون انتخاب‌شده پیدا نشد؛ از میکروفون پیش‌فرض ویندوز استفاده می‌کنم. از تنظیمات جارویس عوضش کنید.');
+  }
   V.ctx = new AudioContext({ sampleRate: 16000 });
   await V.ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: 'text/javascript' })));
   V.src = V.ctx.createMediaStreamSource(V.stream);
@@ -194,7 +206,7 @@ function openSection(o) {
   const go = {
     home: () => (window.showSection ? window.showSection('cc') : window.goHome && window.goHome()), settings: () => window.settingsDialog && window.settingsDialog('global'),
     connectors: () => window.extDialog && window.extDialog('connectors'), plugins: () => window.extDialog && window.extDialog('plugins'),
-    queue: () => window.queueDialog && window.queueDialog(), ops: () => window.openOps && window.openOps(), voice: () => voiceDialog(),
+    queue: () => window.queueDialog && window.queueDialog(), ops: () => window.openOps && window.openOps(), voice: () => (window.showSection ? window.showSection('jarvis') : window.voiceDialog()),
     chat: () => o.chat && window.openChat && window.openChat(o.chat),
   }[o.section];
   if (go) go();
@@ -251,7 +263,7 @@ function ui() {
   document.body.appendChild(el);
   el.querySelector('#vdTalk').onclick = () => { if (V.state === 'recording') finishRecording(); else start(true); };
   el.querySelector('#vdStop').onclick = () => { stopSpeaking(); if (V.state !== 'off') setState('idle'); };
-  el.querySelector('#vdSettings').onclick = () => voiceDialog();
+  el.querySelector('#vdSettings').onclick = () => window.voiceDialog();
   el.querySelector('#vdClose').onclick = () => stop();
   return el;
 }
@@ -472,7 +484,8 @@ window.addEventListener('jarvis:ev', e => {
 });
 
 // ---------- entry points ----------
-window.voiceDialog = voiceDialog;
+// every voice setting now lives behind the gear button of the JARVIS section
+window.voiceDialog = () => (window.jarvisSettings ? window.jarvisSettings('general') : voiceDialog());
 window.voiceOpen = openSection;
 // reminders etc. speak through the assistant when it is on
 window.voiceSpeak = text => { if (V.state !== "off" && settings().voiceSpeak !== false) speakText(text); };
