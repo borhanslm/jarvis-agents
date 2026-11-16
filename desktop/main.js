@@ -7,6 +7,7 @@ const electron = require('electron');
 electron.app.commandLine.appendSwitch('disable-background-timer-throttling');
 electron.app.commandLine.appendSwitch('disable-renderer-backgrounding');
 electron.app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+electron.app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required'); // JARVIS answers out loud without a click
 const { app, BrowserWindow, shell, nativeTheme, Menu, dialog, ipcMain, session, Tray, globalShortcut, Notification } = require('electron');
 const fs = require('fs');
 const path = require('path');

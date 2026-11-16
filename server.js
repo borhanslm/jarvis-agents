@@ -89,7 +89,24 @@ const { Speech } = require('./lib/voice/speech');
 const openaiTarget = () => { const p = providers.view().find(x => x.hasKey && /api\.openai\.com/.test(x.baseUrl)); return p ? { kind: 'openai', baseUrl: p.baseUrl, key: providers.key(p.id) } : null; };
 const geminiTarget = () => { const s = store.settings(); const p = providers.view().find(x => x.hasKey && /generativelanguage\.googleapis\.com/.test(x.baseUrl)); return p ? { kind: 'gemini', key: providers.key(p.id), sttModel: s.voiceGeminiStt, ttsModel: s.voiceGeminiTts } : null; };
 const voiceApiTarget = () => { const w = store.settings().voiceApi || 'auto'; if (w === 'openai') return openaiTarget(); if (w === 'gemini') return geminiTarget(); return geminiTarget() || openaiTarget(); };
-const speech = new Speech({ assets: voiceAssets, apiTarget: voiceApiTarget });
+// keys for the voice-only services live with the other encrypted secrets (voiceKey.<service>)
+const VOICE_SERVICES = ['groq', 'elevenlabs', 'azure', 'deepgram'];
+const voiceKey = id => setup.secrets.get('voiceKey.' + id) || null;
+const groqCore = () => { const p = providers.view().find(x => x.hasKey && /api.groq.com/.test(x.baseUrl)); return p ? providers.key(p.id) : null; };
+const speech = new Speech({ assets: voiceAssets, apiTarget: voiceApiTarget, keys: {
+  gemini: geminiTarget, openai: openaiTarget,
+  groq: () => voiceKey('groq') || groqCore(),
+  elevenlabs: () => voiceKey('elevenlabs'),
+  azure: () => { const k = voiceKey('azure'), r = String(store.settings().voiceAzureRegion || '').trim(); return k && r ? { key: k, region: r } : null; },
+  deepgram: () => voiceKey('deepgram'),
+} });
+const voicePrefs = s => ({ faVoice: s.voiceFaVoice, apiVoice: s.voiceApiVoice, geminiVoice: s.voiceGeminiVoice, elevenVoice: s.voiceElevenVoice, elevenModel: s.voiceElevenModel, azureFa: s.voiceAzureFa, azureEn: s.voiceAzureEn });
+function voiceEngines() {
+  const s = store.settings();
+  return { ...speech.available(), names: require('./lib/voice/speech').NAMES,
+    services: Object.fromEntries(VOICE_SERVICES.map(id => [id, { hasKey: !!voiceKey(id), viaCore: id === 'groq' && !voiceKey(id) && !!groqCore() }])),
+    azureRegion: s.voiceAzureRegion || '', azureVoices: require('./lib/voice/cloud').AZURE_VOICES, hasGemini: !!geminiTarget(), hasOpenai: !!openaiTarget() };
+}
 const net = require('./lib/net');
 const system = require('./lib/system');
 const { Ollama } = require('./lib/ollama');
@@ -350,7 +367,7 @@ const bot = new Bot({
   tasks: async () => { const t = tasks.today(); return t.length ? '📋 تسک‌های امروز:\n' + t.map(x => '• ' + x.title + (x.due ? ' — ' + new Date(x.due).toLocaleString('fa-IR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '') + (x.priority === 'high' ? ' ❗' : '')).join('\n') : 'برای امروز تسکی نیست.'; },
   stopAll: async () => { const ids = [...orch.running.keys()]; for (const id of ids) orch.stop(id); return ids.length; },
   transcribe: async wav => { const s = store.settings(); return speech.transcribe(wav, { engine: s.voiceStt, offline: !(await voiceOnline(s)), lang: s.voiceLang }); },
-  speak: async text => { const s = store.settings(); return speech.speak(text, { engine: s.voiceTts, offline: !(await voiceOnline(s)), prefs: { faVoice: s.voiceFaVoice, apiVoice: s.voiceApiVoice, geminiVoice: s.voiceGeminiVoice } }); },
+  speak: async text => { const s = store.settings(); return speech.speak(text, { engine: s.voiceTts, offline: !(await voiceOnline(s)), prefs: voicePrefs(s) }); },
   onLog: e => { botLog.push(e); if (botLog.length > 200) botLog.splice(0, botLog.length - 200); broadcast({ type: 'botLog', entry: e }); },
 });
 function syncBot() { const c = bot.d.config(); if (c.enabled && c.token && c.chatId && c.channel) { if (!bot.running) bot.start(); } else if (bot.running) bot.stop(); }
@@ -1069,8 +1086,29 @@ async function api(req, res, url) {
         const offline = body.engine === 'local' || !(await voiceOnline(s));
         return send(res, 200, await speech.transcribe(wav, { engine: body.engine === 'local' ? 'local' : s.voiceStt, offline, lang: ['fa', 'en'].includes(body.lang) ? body.lang : s.voiceLang }));
       }
+      if (parts[1] === 'engines' && m === 'GET') return send(res, 200, voiceEngines());
+      // save or clear a voice service key (never sent back)
+      if (parts[1] === 'keys' && m === 'POST') {
+        const id = String(body.service || '');
+        if (!VOICE_SERVICES.includes(id)) throw new Error('سرویس نامعتبر');
+        if (body.key !== undefined) { // missing = keep the saved key (e.g. only the Azure region changed); '' = remove it
+          const key = String(body.key || '').trim();
+          if (key.length > 300 || /s/.test(key)) throw new Error('کلید نامعتبر');
+          setup.secrets.set('voiceKey.' + id, key);
+        }
+        if (id === 'azure' && typeof body.region === 'string') store.updateSettings({ voiceAzureRegion: body.region.trim().toLowerCase().replace(/[^a-z0-9]/g, '') });
+        broadcast({ type: 'settings', settings: store.settings() });
+        return send(res, 200, voiceEngines());
+      }
+      if (parts[1] === 'eleven-voices' && m === 'GET') { const k = voiceKey('elevenlabs'); if (!k) throw new Error('اول کلید ElevenLabs را وارد کنید'); return send(res, 200, await require('./lib/voice/cloud').elevenVoices(k)); }
+      // try one engine: speak a sentence (the panel plays it) and report which engine answered
+      if (parts[1] === 'try' && m === 'POST') {
+        const text = String(body.text || 'سلام! من جارویس هستم.').slice(0, 300);
+        const r = await speech.speak(text, { engine: String(body.engine || 'auto'), prefs: voicePrefs(s) });
+        return send(res, 200, { audio: r.wav.toString('base64'), ms: r.ms, engine: r.engine, fellBack: r.fellBack });
+      }
       if (parts[1] === 'tts' && m === 'POST') {
-        const r = await speech.speak(String(body.text || '').slice(0, 2000), { engine: s.voiceTts, offline: !(await voiceOnline(s)), prefs: { faVoice: s.voiceFaVoice, apiVoice: s.voiceApiVoice, geminiVoice: s.voiceGeminiVoice } });
+        const r = await speech.speak(String(body.text || '').slice(0, 2000), { engine: s.voiceTts, offline: !(await voiceOnline(s)), prefs: voicePrefs(s) });
         return send(res, 200, { audio: r.wav.toString('base64'), ms: r.ms, engine: r.engine });
       }
       if (parts[1] === 'ask' && m === 'POST') {

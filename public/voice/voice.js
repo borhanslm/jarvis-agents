@@ -20,6 +20,24 @@ const V = {
   noise: 0.004, speechMs: 0, silenceMs: 0, recMs: 0, heardSpeech: false,
   idleSeg: [], idleSegMs: 0, idleVoiced: false, idleSilence: 0, faChecking: false,
   audio: null, followUp: false, lastLevel: 0, lastWakeAt: 0, log: [],
+  out: null, outLevel: 0, paused: false,
+};
+const emit = () => window.dispatchEvent(new CustomEvent('jarvis:voice', { detail: { state: V.state, paused: V.paused } }));
+// speaker level (0..1) from what JARVIS is saying right now
+function outLevel() {
+  if (!V.out || !V.out.an || V.state !== 'speaking') return 0;
+  const a = V.out.data; V.out.an.getFloatTimeDomainData(a);
+  let s2 = 0; for (let i = 0; i < a.length; i++) s2 += a[i] * a[i];
+  return Math.min(1, Math.sqrt(s2 / a.length) * 4);
+}
+window.jarvisVoice = {
+  get state() { return V.state; }, get paused() { return V.paused; }, get micError() { return V.micError; },
+  get level() { return V.state === 'speaking' ? outLevel() : Math.min(1, V.lastLevel * 18); },
+  get log() { return V.log; },
+  ask: text => { const t = String(text || '').trim(); if (!t) return; addLog('user', t); return ask(t); },
+  talk: () => { if (V.state === 'off') start(true); else if (V.state === 'recording') finishRecording(); else startRecording(false); },
+  stopSpeaking: () => { stopSpeaking(); if (V.state === 'speaking') setState('idle'); },
+  pause: () => pause(), resume: () => resume(),
 };
 const settings = () => S.settings || {};
 
@@ -192,6 +210,11 @@ async function speakText(text, { thenListen = false } = {}) {
     const bytes = Uint8Array.from(atob(r.audio), c => c.charCodeAt(0));
     const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
     const a = V.audio = new Audio(url);
+    try { // route through an analyser so the orb moves with JARVIS's voice
+      if (!V.out) { const c = new AudioContext(); const an = c.createAnalyser(); an.fftSize = 1024; an.connect(c.destination); V.out = { c, an, data: new Float32Array(1024) }; }
+      if (V.out.c.state === 'suspended') V.out.c.resume().catch(() => {});
+      if (V.out.c.state === 'running') V.out.c.createMediaElementSource(a).connect(V.out.an); // never route into a stopped context (it would be silent)
+    } catch {}
     a.onended = () => { URL.revokeObjectURL(url); if (V.audio === a) { V.audio = null; afterSpeech(thenListen || true); } };
     await a.play();
   } catch (e) {
@@ -224,7 +247,7 @@ function ui() {
     <div class="vd-acts"><button type="button" class="icon-btn" id="vdTalk" title="صحبت (Ctrl+Space)" aria-label="صحبت">${ic('mic')}</button>
       <button type="button" class="icon-btn" id="vdStop" title="قطع" aria-label="قطع">${ic('circle-stop')}</button>
       <button type="button" class="icon-btn" id="vdSettings" title="تنظیمات صدا" aria-label="تنظیمات صدا">${ic('settings')}</button>
-      <button type="button" class="icon-btn" id="vdClose" title="خاموش کردن دستیار صوتی" aria-label="خاموش">${ic('x')}</button></div>`;
+      <button type="button" class="icon-btn" id="vdClose" title="مکث گوش دادن (تا باز کردن دوباره‌ی جارویس)" aria-label="مکث گوش دادن">${ic('pause')}</button></div>`;
   document.body.appendChild(el);
   el.querySelector('#vdTalk').onclick = () => { if (V.state === 'recording') finishRecording(); else start(true); };
   el.querySelector('#vdStop').onclick = () => { stopSpeaking(); if (V.state !== 'off') setState('idle'); };
@@ -242,6 +265,7 @@ function setState(s, hint) {
   if (s === 'idle' && settings().voiceWake === false) el.querySelector('#vdState').textContent = 'آماده — Ctrl+Space یا دکمه‌ی میکروفون';
   if (hint !== undefined) setHint(hint);
   if (window.jarvisDesktop && window.jarvisDesktop.voice) window.jarvisDesktop.voice({ state: s, label: STATE_FA[s] });
+  emit();
   const b = $('#btnVoice'); if (b) { b.classList.toggle('on', s !== 'off'); b.dataset.state = s; b.title = s === 'off' ? 'دستیار صوتی (خاموش)' : 'دستیار صوتی — ' + STATE_FA[s] + ' · میکروفون روشن است'; }
 }
 // online / offline badge on the dock
@@ -297,13 +321,14 @@ function addLog(who, text) {
   V.log.push({ who, text, ts: Date.now() }); if (V.log.length > 100) V.log.shift();
   if (who === 'error') setHint('⚠ ' + text); else setHint(text);
   const l = document.getElementById('vLog'); if (l) l.innerHTML = logHtml();
+  window.dispatchEvent(new CustomEvent('jarvis:voicelog', { detail: { who, text } }));
 }
 const logHtml = () => V.log.slice().reverse().map(l => `<div class="vl ${l.who}"><b>${l.who === 'user' ? 'شما' : l.who === 'jarvis' ? 'جارویس' : 'خطا'}</b><span dir="auto">${esc(l.text)}</span></div>`).join('') || '<div class="help">هنوز گفتگویی نشده.</div>';
 
 // ---------- on / off ----------
 async function start(talkNow) {
   try {
-    if (!settings().voiceEnabled) await api('/settings', { body: { voiceEnabled: true } });
+    V.paused = false; V.micError = null;
     ui(); setState('idle', 'در حال آماده شدن…');
     await startMic();
     let st = await api('/voice/status');
@@ -315,6 +340,7 @@ async function start(talkNow) {
     setState('idle', V.wwError ? 'تشخیص «هی جارویس» بار نشد: ' + V.wwError : !st.assets.wakeword.installed && settings().voiceWake !== false ? 'برای «هی جارویس» مدلش را از تنظیمات صدا دانلود کنید. فعلاً Ctrl+Space.' : '');
     if (talkNow) startRecording(false);
   } catch (e) {
+    V.micError = e.name === 'NotAllowedError' ? 'اجازه‌ی میکروفون داده نشد' : e.name === 'NotFoundError' ? 'میکروفونی پیدا نشد' : e.message;
     stopMic(); setState('off');
     window.toast && window.toast(e.name === 'NotAllowedError' ? 'اجازه‌ی میکروفون داده نشد.' : e.name === 'NotFoundError' ? 'میکروفونی پیدا نشد.' : 'دستیار صوتی: ' + e.message, true);
   }
@@ -346,10 +372,9 @@ window.addEventListener('jarvis:ev', async e => {
   } else if (V.state === 'idle') setHint('آماده‌سازی دستیار صوتی (فقط بار اول): ' + fa(Math.round(got / Math.max(1, tot) * 100)) + '٪');
 });
 
-async function stop() {
-  stopSpeaking(); stopMic(); setState('off');
-  try { await api('/settings', { body: { voiceEnabled: false } }); } catch {}
-}
+async function stop() { pause(); }
+function pause() { V.paused = true; stopSpeaking(); stopMic(); setState('off'); window.toast && window.toast('گوش دادن مکث شد. با دکمه‌ی میکروفون یا «ادامه» دوباره روشن می‌شود.'); }
+function resume() { V.paused = false; start(false); }
 
 // ---------- settings dialog ----------
 const MB = n => fa(Math.round(n / 1e6)) + ' مگابایت';
@@ -453,7 +478,7 @@ window.voiceOpen = openSection;
 window.voiceSpeak = text => { if (V.state !== "off" && settings().voiceSpeak !== false) speakText(text); };
 window.voiceStart = start;
 const btn = document.getElementById('btnVoice');
-if (btn) btn.onclick = () => (V.state === 'off' ? start(false) : voiceDialog());
+if (btn) btn.onclick = () => (V.state === 'off' ? start(false) : (window.showSection ? window.showSection('jarvis') : voiceDialog()));
 document.addEventListener('keydown', e => {
   if (e.ctrlKey && (e.code === 'Space') && !e.shiftKey && !e.altKey) {
     e.preventDefault();
@@ -462,5 +487,10 @@ document.addEventListener('keydown', e => {
     else startRecording(false);
   }
 });
-// turn back on after a restart if it was on (the mic permission is the app's own)
-setTimeout(() => { if (settings().voiceEnabled) start(false); }, 1500);
+// Always on: whenever JARVIS opens it listens for "Hey Jarvis" (after the members-club sign-in,
+// when there is one). The mic permission is the app's own; nothing is sent before the wake word.
+(function autoStart() {
+  const ready = () => S && S.settings && !document.documentElement.classList.contains('club-locked');
+  const go = () => { if (!ready()) return setTimeout(go, 1500); if (V.state === 'off' && !V.paused) start(false); };
+  setTimeout(go, 1500);
+})();
