@@ -404,6 +404,10 @@ async function voiceAct(a) {
   }
   if (a.type === 'add_task') { const d = p.due ? Date.parse(p.due) : NaN; const t = tasks.add({ title: p.title, due: Number.isFinite(d) ? new Date(d).toISOString() : null, priority: p.priority, category: p.category, repeat: p.repeat, remindBefore: p.remindBefore }, 'voice'); return { ok: true, task: t }; }
   if (a.type === 'complete_task') { const t = tasks.get(String(p.id || '')); if (!t) return { ok: false, error: 'تسک پیدا نشد' }; tasks.complete(t.id); return { ok: true, task: t }; }
+  // the computer: programs, websites, folders, volume, power (lib/pc.js)
+  if (['open_app', 'open_url', 'web_search', 'open_folder', 'volume', 'media', 'screenshot', 'close_app', 'power'].includes(a.type)) {
+    try { return { ok: true, pc: await require('./lib/pc').run(a.type, p) }; } catch (e) { return { ok: false, error: e.message }; }
+  }
   if (a.type === 'open') return { ok: true, open: { section: String(p.section || 'home'), chat: p.chat ? (findByName([...store.chats.values()], p.chat, 'title') || {}).id || null : null } };
   return null;
 }
