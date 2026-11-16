@@ -251,3 +251,29 @@ test('Gemini voice: a retired model falls back to the next one', async () => {
     await assert.rejects(new sp.ApiTTS(() => ({ kind: 'gemini', key: 'bad' })).speak('x'), /کلید API/);
   } finally { global.fetch = real; }
 });
+
+// Gemini says "high demand" (503): retry once, then the next model; if every model is busy, the free local voice speaks
+test('Gemini voice: busy (503) retries, moves on, then falls back to the local voice', async () => {
+  process.env.JARVIS_GEMINI_RETRY_MS = '1';
+  delete require.cache[require.resolve('../lib/voice/speech')];
+  const sp = require('../lib/voice/speech');
+  const real = global.fetch, seen = [];
+  const busy = () => new Response(JSON.stringify({ error: { code: 503, message: 'This model is currently experiencing high demand.' } }), { status: 503 });
+  global.fetch = async u => { const m = decodeURIComponent(String(u).split('/models/')[1].split(':')[0]); seen.push(m);
+    if (m === 'gemini-3.8-flash-lite-tts') return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;rate=24000', data: Buffer.alloc(64).toString('base64') } }] } }] }), { status: 200 });
+    return busy(); };
+  try {
+    await new sp.ApiTTS(() => ({ kind: 'gemini', key: 'k', ttsModel: 'gemini-3.8-flash-tts' })).speak('سلام');
+    assert.deepEqual(seen.slice(0, 3), ['gemini-3.8-flash-tts', 'gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'], 'one retry, then the lighter model');
+    // every model busy: the error is marked busy, and Speech uses the local voice instead
+    global.fetch = async () => busy();
+    delete require.cache[require.resolve('../lib/voice/speech')];
+    const sp2 = require('../lib/voice/speech');
+    const s = new sp2.Speech({ assets: { status: () => ({}), path: () => '' }, apiTarget: () => ({ kind: 'gemini', key: 'k' }) });
+    s.piper = { ready: () => true, speak: async () => ({ wav: Buffer.alloc(4) }) };
+    const r = await s.speak('سلام', { engine: 'api' });
+    assert.equal(r.engine, 'local'); assert.equal(r.fellBack, true);
+    s.piper = { ready: () => false };
+    await assert.rejects(s.speak('سلام', { engine: 'api' }), /شلوغ/);
+  } finally { global.fetch = real; delete process.env.JARVIS_GEMINI_RETRY_MS; }
+});
