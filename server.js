@@ -644,6 +644,21 @@ async function pcStart(task, { history = [], approved = [] } = {}) {
 // every action goes through here: the permission switches («مجوزها») and the audit log
 const auditMod = require('./lib/audit');
 const audit = new auditMod.Audit(DATA);
+// browser test with a report
+const webtestMod = require('./lib/webtest');
+const webtest = new webtestMod.WebTest(DATA);
+async function webVerdict(r, spec) {
+  const st = store.settings(); spec = spec && spec !== 'auto' ? spec : st.reviewerModel || 'claude-sonnet-5-5';
+  const shots = []; for (const v of r.viewports) { const p = r.pages.find(x => x.viewport === v && x.shot != null); const b = p && webtest.shot(r.id, p.shot); if (b) shots.push({ type: 'image', data: b.toString('base64'), mime: 'image/png' }); }
+  const x = await chatLLM({ spec, system: 'You are a QA engineer reviewing an automated browser test of a website.', messages: [{ role: 'user', content: [{ type: 'text', text: webtestMod.verdictPrompt(r) }, ...shots] }], maxTokens: 2500, temperature: 0.2, signal: AbortSignal.timeout(300000) });
+  return webtest.saveVerdict(r.id, `${String(x.text || '').trim()}\n\n— ${spec}`);
+}
+async function runWebTest(opts, aiSpec) {
+  let r = await webtest.run(opts, p => broadcast({ type: 'webtest', progress: p }));
+  broadcast({ type: 'webtest', done: true, report: r });
+  if (aiSpec) { try { broadcast({ type: 'webtest', judging: r.id }); r = await webVerdict(r, aiSpec); broadcast({ type: 'webtest', done: true, report: r }); } catch (e) { broadcast({ type: 'webtest', error: 'نظر هوش مصنوعی: ' + e.message, id: r.id }); } }
+  return r;
+}
 async function voiceAct(a, via = 'voice') {
   if (!a) return null;
   if (!auditMod.allowed(store.settings(), a.type)) { audit.log(via, a.type, a.params, { ok: false, error: 'blocked by permissions' }); return { ok: false, error: 'این کار در «مجوزها و گزارش» خاموش است' }; }
@@ -1263,6 +1278,25 @@ ${String(body.issues || '').slice(0, 12000)}`;
         const r = await voiceAct({ type: 'run_team', params: { project: p.name, task, mode: 'team' } }, 'panel');
         return send(res, r && r.ok ? 200 : 400, r || { error: 'شروع نشد' });
       }
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
+  // browser test with a report (hidden window of the desktop app)
+  if (parts[0] === 'webtest') {
+    try {
+      if (!parts[1] && m === 'GET') return send(res, 200, { available: webtestMod.available(), running: webtest.running ? webtest.running.id : null, list: webtest.list(), projects: store.projects().map(p => { const s = store.settings(p.id), pv = previews.get(p.id); return { id: p.id, name: p.name, url: (pv && pv.url) || s.previewUrl || '', running: !!pv }; }) });
+      if (parts[1] === 'run' && m === 'POST') {
+        const opts = { url: body.url, maxPages: body.maxPages, viewports: Array.isArray(body.viewports) ? body.viewports : undefined, projectId: String(body.projectId || '') };
+        webtestMod.checkUrl(opts.url); if (!webtestMod.available()) throw new Error('تست مرورگر فقط داخل برنامه‌ی دسکتاپ جارویس کار می‌کند');
+        audit.log('panel', 'web_test', { url: opts.url });
+        runWebTest(opts, body.ai ? String(body.model || '') || 'auto' : '').catch(e => broadcast({ type: 'webtest', error: e.message }));
+        return send(res, 200, { ok: true });
+      }
+      if (parts[1] === 'stop' && m === 'POST') { webtest.stop(); return send(res, 200, { ok: true }); }
+      if (parts[1] && !parts[2] && m === 'GET') return send(res, 200, webtest.get(parts[1]));
+      if (parts[1] && !parts[2] && m === 'DELETE') { webtest.remove(parts[1]); return send(res, 200, { ok: true }); }
+      if (parts[2] === 'shot' && m === 'GET') { const b = webtest.shot(parts[1], parts[3]); return b ? send(res, 200, { data: b.toString('base64') }) : send(res, 404, { error: 'not found' }); }
+      if (parts[2] === 'html' && m === 'GET') return send(res, 200, { html: webtest.html(parts[1]) });
+      if (parts[2] === 'verdict' && m === 'POST') return send(res, 200, await webVerdict(webtest.get(parts[1]), String(body.model || '')));
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
   if (parts[0] === 'kb') {
