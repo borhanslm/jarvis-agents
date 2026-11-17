@@ -322,7 +322,12 @@ function nvidiaGpu() {
 nvidiaGpu();
 // local date-time with offset, e.g. 2026-11-15T08:02:46+03:30 (models turn "tomorrow 10am" into a date with it)
 function localIso(d = new Date()) { const o = -d.getTimezoneOffset(), p = n => String(Math.floor(Math.abs(n))).padStart(2, '0'); return new Date(d.getTime() + o * 60000).toISOString().slice(0, 19) + (o >= 0 ? '+' : '-') + p(o / 60) + ':' + p(o % 60); }
-const voiceContext = () => {
+// What JARVIS knows when it answers. Messages, SMS and purchase requests are added only when the
+// request is about them, so they are not sent to an online model with every sentence.
+const ASKS_MESSAGES = /پیام|پیامک|اس\s*ام\s*اس|مسیج|اعلان|نوتیف|چه خبر|خبر(ی)? (تازه|جدید)|کد (تایید|تأیید|ورود|پیامکی)|بخون|بخوان|sms|message|notif|what'?s new|anything new|read (it|them|my)/i;
+const ASKS_SALES = /خرید|خریدار|لایسنس|فروش|سفارش|مشتری|پرداخت|کارت به کارت|تایید کن|تأیید کن|رد کن|license|purchase|buyer|sale|order|approve|reject/i;
+const agoFa = ms => { const m = Math.round((Date.now() - ms) / 6e4); return m < 2 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' days ago'; };
+const voiceContext = async (said = '') => {
   const chats = [...store.chats.values()];
   const proj = id => (store.project(id) || {}).name || '?';
   const lastReport = c => { const m = [...c.messages].reverse().find(x => x.kind === 'report'); return m ? `${m.report.rounds || 0} rounds, ${(m.report.files || []).length} files changed${m.report.openBugs ? ', ' + m.report.openBugs + ' open bugs' : ''}` : ''; };
@@ -334,8 +339,22 @@ const voiceContext = () => {
     recent: chats.filter(c => !orch.running.has(c.id) && c.messages.length && ['done', 'error', 'needs-attention', 'unverified', 'stopped', 'budget'].includes(c.status))
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 3).map(c => ({ title: c.title, status: c.status, report: lastReport(c) })),
     tasks: tasks.today().slice(0, 25),
+    upcoming: (() => { const end = new Date(); end.setHours(23, 59, 59, 999); const from = end.getTime(), to = from + 7 * 864e5; return tasks.all().filter(t => !t.done && t.due && t.due > from && t.due <= to).sort((a, b) => a.due - b.due).slice(0, 25); })(),
+    admin: clubAdmin() && !!(club.url() && club.token()),
+    ...(ASKS_MESSAGES.test(said) ? {
+      notices: notices.list.filter(n => !n.read).slice(-12).reverse().map(n => ({ kind: n.kind, title: n.title.replace(/[⁨⁩]/g, ''), body: n.body, ago: agoFa(n.at) })),
+      phoneLinked: phonePaired(),
+      ...(phoneData.sms ? { sms: phoneData.sms.filter(m => !m.out).slice(0, 8).map(m => ({ from: m.from, body: m.body.slice(0, 220), ago: agoFa(m.date) })), smsAt: agoFa(phoneData.smsAt) } : {}),
+      ...(phoneData.notifications ? { phoneNotifications: phoneData.notifications.slice(0, 8) } : {}),
+    } : {}),
+    ...(ASKS_SALES.test(said) && clubAdmin() && club.url() && club.token() ? { purchases: await freshPurchases() } : {}),
   };
 };
+// purchase requests for the voice brain (a minute of cache)
+async function freshPurchases() {
+  if (Date.now() - pendingPurchases.at > 60000) { try { const r = await club.call('GET', '/api/admin/purchases?status=pending'); pendingPurchases = { list: (r && r.purchases) || [], at: Date.now() }; } catch {} }
+  return pendingPurchases.list.slice(0, 15).map(p => ({ id: p.id, name: p.userName, email: p.userEmail, amount: p.amount, ref: p.ref, card4: p.card4, ago: agoFa(p.created) }));
+}
 const brain = new Brain({ chat: chatLLM, context: voiceContext });
 // phone actions asked on the computer: queued for the paired Android app (it picks them up live, or when it opens)
 const phoneTasks = [];
@@ -371,21 +390,43 @@ function takePhoneData(what, data) {
   broadcast({ type: 'phoneData', what });
 }
 // new purchase requests -> the bell (only for the admin, whose club account can see them)
+let pendingPurchases = { list: [], at: 0 };
 async function checkPurchases() {
   if (!club.url() || !club.token() || !clubAdmin() || !club.state().loggedIn) return;
   const r = await club.call('GET', '/api/admin/purchases?status=pending');
+  pendingPurchases = { list: (r && r.purchases) || [], at: Date.now() };
   for (const p of (r && r.purchases) || []) {
     if (notices.list.some(n => n.key === 'sale:' + p.id)) continue;
-    notices.add({ kind: 'sale', title: 'درخواست خرید تازه' + (p.amount ? ' — ' + p.amount : ''), body: [p.email || p.name, p.ref ? 'کد پیگیری ' + p.ref : ''].filter(Boolean).join(' · '), section: 'seller', key: 'sale:' + p.id });
+    notices.add({ kind: 'sale', title: 'درخواست خرید تازه' + (p.amount ? ' — ' + p.amount : ''), body: [p.userName || p.userEmail, p.ref ? 'کد پیگیری ' + p.ref : ''].filter(Boolean).join(' · '), section: 'seller', key: 'sale:' + p.id });
   }
 }
 setInterval(() => checkPurchases().catch(() => {}), 3 * 6e4).unref();
 setTimeout(() => checkPurchases().catch(() => {}), 20000).unref();
+// approve (license -> buyer's club account -> their app activates itself) or reject one purchase request;
+// used by the button on the sales page and by the voice assistant (after a yes)
+async function decidePurchase(id, approve, reason) {
+  const s = store.settings();
+  const list = (await club.call('GET', '/api/admin/purchases?status=pending')).purchases;
+  const p = list.find(x => x.id === String(id)); if (!p) throw new Error('این درخواست دیگر در انتظار نیست');
+  pendingPurchases = { list: list.filter(x => x.id !== p.id), at: Date.now() };
+  if (!approve) { await club.call('PATCH', '/api/admin/purchases/' + p.id, { status: 'rejected', reason: String(reason || 'پرداخت پیدا نشد').slice(0, 200) }); return { ok: true, purchase: p }; }
+  if (!setup.secrets.get('sellerPrivateKey')) throw new Error('اول «کلید امضای فروش» را بسازید');
+  const r = license.issue({ privateKey: setup.secrets.get('sellerPrivateKey'), device: p.device, buyer: '' });
+  const code = license.shortCode();
+  const sale = { id: r.payload.id, code, codeHash: license.codeHash(code), device: r.payload.d, buyer: String(p.userName || '').slice(0, 40), contact: p.userEmail, amount: Math.max(0, +String(p.amount || s.sellPrice || '').replace(/\D/g, '') || 0),
+    note: `پیگیری ${p.ref}${p.card4 ? ' · کارت ' + p.card4 : ''}`, kind: 'sale', issuedAt: Date.now(), updatesUntil: r.payload.u * 864e5, key: r.key, memberEmail: String(p.userEmail || '').toLowerCase(), purchaseId: p.id };
+  const sales = readSales(); sales.push(sale); writeSales(sales);
+  const member = await clubLicense(sale);
+  if (!member || !member.ok) throw new Error('لایسنس ساخته شد ولی به حساب خریدار نرسید: ' + ((member && member.error) || 'باشگاه در دسترس نیست') + ' — از فهرست فروش‌ها کلید را دستی بفرستید.');
+  await club.call('PATCH', '/api/admin/purchases/' + p.id, { status: 'approved', licenseId: sale.id });
+  if (s.sellRepo) publishLicenses().catch(() => {});
+  return { ok: true, sale, purchase: p };
+}
 // ---- Telegram / Bale assistant (two-way) ----
 const { Media } = require('./lib/media');
 const media = new Media(voiceAssets);
 const { Bot } = require('./lib/bot');
-const botBrain = new Brain({ chat: chatLLM, context: () => ({ ...voiceContext(), channel: 'telegram' }) });
+const botBrain = new Brain({ chat: chatLLM, context: async said => ({ ...(await voiceContext(said)), channel: 'telegram' }) });
 const botLog = [];
 // the brain's model: online when possible, the offline model when the internet is down (like voice)
 async function brainAsk(b, text) {
@@ -477,6 +518,16 @@ async function voiceAct(a) {
   // the computer: programs, websites, folders, volume, power (lib/pc.js)
   if (['open_app', 'open_url', 'web_search', 'open_folder', 'volume', 'media', 'screenshot', 'close_app', 'power'].includes(a.type)) {
     try { return { ok: true, pc: await require('./lib/pc').run(a.type, p) }; } catch (e) { return { ok: false, error: e.message }; }
+  }
+  if (a.type === 'mark_read') { notices.read('all'); return { ok: true }; }
+  if (a.type === 'approve_purchase' || a.type === 'reject_purchase') {
+    if (!clubAdmin() || !club.token()) return { ok: false, error: 'فقط مدیر باشگاه می‌تواند خریدها را تأیید کند' };
+    try {
+      const r = await decidePurchase(String(p.id || ''), a.type === 'approve_purchase', p.reason);
+      notices.add({ kind: 'sale', title: (a.type === 'approve_purchase' ? 'خرید تأیید شد: ' : 'خرید رد شد: ') + (r.purchase.userName || r.purchase.userEmail || ''), section: 'seller', key: 'sale:' + r.purchase.id });
+      notices.read(notices.list.filter(n => n.key === 'sale:' + r.purchase.id).map(n => n.id));
+      return { ok: true, purchase: { id: r.purchase.id, name: r.purchase.userName } };
+    } catch (e) { return { ok: false, error: e.message }; }
   }
   if (a.type === 'open') return { ok: true, open: { section: String(p.section || 'home'), chat: p.chat ? (findByName([...store.chats.values()], p.chat, 'title') || {}).id || null : null } };
   return null;
@@ -1090,21 +1141,8 @@ async function api(req, res, url) {
         return send(res, 200, await club.call('GET', '/api/admin/purchases?status=' + st));
       }
       if ((parts[1] === 'approve' || parts[1] === 'reject') && parts[2] && m === 'POST') {
-        const list = (await club.call('GET', '/api/admin/purchases?status=pending')).purchases;
-        const p = list.find(x => x.id === parts[2]); if (!p) throw new Error('این درخواست دیگر در انتظار نیست');
-        if (parts[1] === 'reject') { await club.call('PATCH', '/api/admin/purchases/' + p.id, { status: 'rejected', reason: String(body.reason || 'پرداخت پیدا نشد').slice(0, 200) }); return send(res, 200, { ok: true }); }
-        if (!setup.secrets.get('sellerPrivateKey')) throw new Error('اول «کلید امضای فروش» را بسازید');
-        // one click: license for the buyer's phone -> into their club account -> the app activates itself
-        const r = license.issue({ privateKey: setup.secrets.get('sellerPrivateKey'), device: p.device, buyer: '' });
-        const code = license.shortCode();
-        const sale = { id: r.payload.id, code, codeHash: license.codeHash(code), device: r.payload.d, buyer: String(p.userName || '').slice(0, 40), contact: p.userEmail, amount: Math.max(0, +String(p.amount || s.sellPrice || '').replace(/\D/g, '') || 0),
-          note: `پیگیری ${p.ref}${p.card4 ? ' · کارت ' + p.card4 : ''}`, kind: 'sale', issuedAt: Date.now(), updatesUntil: r.payload.u * 864e5, key: r.key, memberEmail: String(p.userEmail || '').toLowerCase(), purchaseId: p.id };
-        const sales = readSales(); sales.push(sale); writeSales(sales);
-        const member = await clubLicense(sale);
-        if (!member || !member.ok) throw new Error('لایسنس ساخته شد ولی به حساب خریدار نرسید: ' + ((member && member.error) || 'باشگاه در دسترس نیست') + ' — از فهرست فروش‌ها کلید را دستی بفرستید.');
-        await club.call('PATCH', '/api/admin/purchases/' + p.id, { status: 'approved', licenseId: sale.id });
-        if (s.sellRepo) publishLicenses().catch(() => {});
-        return send(res, 200, { ok: true, sale, view: sellerView() });
+        const r = await decidePurchase(parts[2], parts[1] === 'approve', body.reason);
+        return send(res, 200, r.sale ? { ...r, view: sellerView() } : r);
       }
       if (parts[1] === 'verify' && m === 'POST') { const v = license.verify(body.key, s.sellerPublicKey, body.device || null); return send(res, 200, { ...v, message: v.ok ? 'معتبر است' : license.REASON_FA[v.reason] }); }
       if (parts[1] === 'publish' && m === 'POST') { if (typeof body.repo === 'string') store.updateSettings({ sellRepo: body.repo.trim() }); return send(res, 200, { ...(await publishLicenses()), view: sellerView() }); }

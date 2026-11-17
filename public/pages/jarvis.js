@@ -194,6 +194,7 @@ async function tabGeneral(el) {
       <label class="check"><input type="checkbox" id="gWake" ${s.voiceWake !== false ? 'checked' : ''}> با گفتن «هی جارویس» بیدار شود</label>
       <div class="field"><label for="gThr">حساسیت (${fa(Math.round((+s.voiceWakeThreshold || 0.5) * 100))}٪ — کمتر = حساس‌تر)</label><input id="gThr" type="range" min="0.2" max="0.9" step="0.05" value="${+s.voiceWakeThreshold || 0.5}"></div>
       <label class="check"><input type="checkbox" id="gSpeak" ${s.voiceSpeak !== false ? 'checked' : ''}> جواب‌ها را بلند بخواند</label>
+      <label class="check"><input type="checkbox" id="gAnnounce" ${s.voiceAnnounce !== false ? 'checked' : ''}> خبرهای تازه را بلند بگوید (پیامک، درخواست خرید، پایان کار ایجنت‌ها)</label>
       <div class="field"><label for="gLang">زبان گفتار</label><select id="gLang">${opts([['auto', 'خودکار فارسی/انگلیسی'], ['fa', 'فقط فارسی (سریع‌تر)'], ['en', 'فقط انگلیسی (سریع‌تر)']], s.voiceLang || 'auto')}</select></div></section>
     <section class="jvs-sec"><h3>${ic('brain', 'sm')}مغز جارویس</h3>
       <div class="field"><label for="gMode">آنلاین یا آفلاین</label><select id="gMode">${opts([['auto', 'خودکار — با اینترنت آنلاین، بدون اینترنت آفلاین (پیشنهادی)'], ['online', 'همیشه آنلاین'], ['offline', 'همیشه آفلاین — هیچ چیز از این کامپیوتر بیرون نمی‌رود']], s.voiceMode || 'auto')}</select></div>
@@ -203,7 +204,7 @@ async function tabGeneral(el) {
   $('#gMic', el).onchange = () => startMeter($('#gMic', el).value, $('#gBar', el));
   startMeter(micOk ? s.voiceMicId : '', $('#gBar', el));
   $('#gSave', el).onclick = async () => {
-    const body = { voiceMicId: $('#gMic', el).value, voiceWake: $('#gWake', el).checked, voiceWakeThreshold: +$('#gThr', el).value, voiceSpeak: $('#gSpeak', el).checked, voiceLang: $('#gLang', el).value, voiceMode: $('#gMode', el).value, voiceModel: $('#gModel', el).value, voiceModelOffline: $('#gOff', el).value };
+    const body = { voiceMicId: $('#gMic', el).value, voiceWake: $('#gWake', el).checked, voiceWakeThreshold: +$('#gThr', el).value, voiceSpeak: $('#gSpeak', el).checked, voiceAnnounce: $('#gAnnounce', el).checked, voiceLang: $('#gLang', el).value, voiceMode: $('#gMode', el).value, voiceModel: $('#gModel', el).value, voiceModelOffline: $('#gOff', el).value };
     if (body.voiceMode === 'offline' && !body.voiceModelOffline) return window.toast('برای حالت آفلاین، یک «مغز آفلاین» انتخاب کنید.', true);
     const micChanged = body.voiceMicId !== (s.voiceMicId || '') || !micOk;
     try { await save(body); stopMeter(); if (micChanged) await V().reloadMic(); await V().reloadWake(); window.toast('ذخیره شد'); tabGeneral(el); } catch (x) { window.toast(x.message, true); }

@@ -207,9 +207,10 @@ function openSection(o) {
     home: () => (window.showSection ? window.showSection('cc') : window.goHome && window.goHome()), settings: () => window.settingsDialog && window.settingsDialog('global'),
     connectors: () => window.extDialog && window.extDialog('connectors'), plugins: () => window.extDialog && window.extDialog('plugins'),
     queue: () => window.queueDialog && window.queueDialog(), ops: () => window.openOps && window.openOps(), voice: () => (window.showSection ? window.showSection('jarvis') : window.voiceDialog()),
-    chat: () => o.chat && window.openChat && window.openChat(o.chat),
+    chat: () => (o.chat && window.openChat ? (window.showSection && window.showSection('code'), window.openChat(o.chat)) : window.showSection && window.showSection('chat')),
   }[o.section];
   if (go) go();
+  else if (window.showSection) window.showSection(o.section === 'ai' ? 'ai' : o.section); // any section of the app (tasks, sms, seller…)
 }
 
 // ---------- speaking ----------
@@ -493,6 +494,16 @@ window.addEventListener('jarvis:ev', e => {
 // every voice setting now lives behind the gear button of the JARVIS section
 window.voiceDialog = () => (window.jarvisSettings ? window.jarvisSettings('general') : voiceDialog());
 window.voiceOpen = openSection;
+// something new (an SMS, a purchase request, a finished job): JARVIS says it out loud when it is free.
+// Reminders already speak on their own; results from the phone too.
+const SAY_NEW = { sms: n => n.title.replace(/[⁨⁩]/g, '') + '.', sale: n => n.title + (n.body ? '، ' + n.body.split(' · ')[0] : '') + '.', job: n => n.title + '.' };
+window.addEventListener('jarvis:ev', e => {
+  const ev = e.detail; if (!ev || ev.type !== 'notice' || !ev.notice) return;
+  const f = SAY_NEW[ev.notice.kind];
+  if (!f || V.state !== 'idle' || settings().voiceSpeak === false || settings().voiceAnnounce === false) return;
+  const text = f(ev.notice);
+  addLog('jarvis', text); speakText(text);
+});
 // reminders etc. speak through the assistant when it is on
 window.voiceSpeak = text => { if (V.state !== "off" && settings().voiceSpeak !== false) speakText(text); };
 window.voiceStart = start;
