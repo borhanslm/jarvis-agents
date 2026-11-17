@@ -36,8 +36,8 @@ function render() {
   U.el.innerHTML = `<div class="pg au-page">
     <header class="pg-head"><div><h1>${ic('shield')}مجوزها و گزارش<span class="hud-tag" aria-hidden="true">AUDIT</span></h1>
       <p class="help">ببینید جارویس چه کارهایی کرده (چه کسی خواست، چه شد) و تعیین کنید چه کارهایی اجازه دارد. همه‌چیز فقط روی همین کامپیوتر ذخیره می‌شود و رمزها هیچ‌وقت نوشته نمی‌شوند.</p></div></header>
-    <nav class="bell-tabs" role="tablist"><button type="button" role="tab" aria-selected="${U.tab === 'log'}" data-utab="log">${ic('history', 'sm')} گزارش کارها</button><button type="button" role="tab" aria-selected="${U.tab === 'perms'}" data-utab="perms">${ic('lock', 'sm')} مجوزها</button></nav>
-    ${U.tab === 'perms' ? `<section class="sl-card au-perms">${PERMS.map(([k, i, t, h]) => `<label class="au-perm"><span class="ext-ic">${ic(i)}</span><span class="au-pt"><b>${t}</b><small class="help">${h}</small></span><span class="switch"><input type="checkbox" data-perm="${k}" ${s[k] !== false ? 'checked' : ''}><span></span></span></label>`).join('')}
+    <nav class="bell-tabs" role="tablist"><button type="button" role="tab" aria-selected="${U.tab === 'log'}" data-utab="log">${ic('history', 'sm')} گزارش کارها</button><button type="button" role="tab" aria-selected="${U.tab === 'perms'}" data-utab="perms">${ic('lock', 'sm')} مجوزها</button><button type="button" role="tab" aria-selected="${U.tab === 'budget'}" data-utab="budget">${ic('wallet', 'sm')} بودجه‌ها</button></nav>
+    ${U.tab === 'budget' ? budgetHtml() : U.tab === 'perms' ? `<section class="sl-card au-perms">${PERMS.map(([k, i, t, h]) => `<label class="au-perm"><span class="ext-ic">${ic(i)}</span><span class="au-pt"><b>${t}</b><small class="help">${h}</small></span><span class="switch"><input type="checkbox" data-perm="${k}" ${s[k] !== false ? 'checked' : ''}><span></span></span></label>`).join('')}
       <p class="help">${ic('info', 'sm')} وقتی یک مورد خاموش باشد، جارویس آن کار را با صدا، تلگرام، چت یا ایجنت انجام نمی‌دهد و در گزارش با «رد شد» ثبت می‌شود.</p></section>` : `
     <div class="au-filters">
       <div class="sms-search">${ic('search', 'sm')}<input id="auQ" type="search" value="${esc(U.f.q)}" placeholder="جستجو در کارها" aria-label="جستجو"></div>
@@ -50,9 +50,30 @@ function render() {
   </div>`;
   bind();
 }
+const usd = n => '$' + (+n || 0).toFixed(2);
+function bar(spent, budget) { if (!budget) return '<span class="help">بدون سقف</span>'; const p = Math.min(100, Math.round(100 * spent / budget)); return `<div class="au-bar ${p >= 100 ? 'full' : p >= 80 ? 'warn' : ''}" role="img" aria-label="${p}٪ مصرف شده"><i style="width:${p}%"></i></div><small class="help">${Number(p).toLocaleString('fa-IR')}٪</small>`; }
+function budgetHtml() {
+  const b = U.budgets; if (!b) return '<p class="help">در حال خواندن…</p>';
+  const row = (kind, x) => `<tr><td dir="auto">${esc(x.name)}</td><td dir="ltr">${usd(x.spent)}</td><td class="au-bw">${bar(x.spent, x.budget)}</td><td><span class="au-in" dir="ltr">$ <input type="number" min="0" step="1" value="${x.budget || ''}" placeholder="0" data-bkind="${kind}" data-bid="${esc(x.id)}" aria-label="بودجه‌ی ماهانه‌ی ${esc(x.name)}"></span></td></tr>`;
+  return `<p class="help">${ic('info', 'sm')} سقف خرج هر ماه (دلار). وقتی یک پروژه به سقفش برسد کار تازه‌ای برایش شروع نمی‌شود و کار در حال اجرا هم سر سقف می‌ایستد؛ ایجنتی که به سقفش برسد آن ماه بررسی نمی‌کند. با ۸۰٪ یک اعلان می‌آید. ۰ یعنی بدون سقف. با اشتراک Pro/Max هزینه‌ی Claude تخمینی است.</p>
+    <div class="au-total">خرج این ماه روی همه‌ی پروژه‌ها: <b dir="ltr">${usd(b.total)}</b>${b.runCap ? ` · سقف هر اجرا: <b dir="ltr">${usd(b.runCap)}</b>` : ''}</div>
+    <h2 class="pg-sub">${ic('folder', 'sm')} پروژه‌ها</h2>
+    ${b.projects.length ? `<table class="ar-board au-btable"><thead><tr><th>پروژه</th><th>این ماه</th><th>مصرف</th><th>سقف ماهانه</th></tr></thead><tbody>${b.projects.map(x => row('project', x)).join('')}</tbody></table>` : '<p class="help">پروژه‌ای نیست.</p>'}
+    <h2 class="pg-sub">${ic('bot', 'sm')} ایجنت‌ها</h2>
+    ${b.agents.length ? `<table class="ar-board au-btable"><thead><tr><th>ایجنت</th><th>این ماه</th><th>مصرف</th><th>سقف ماهانه</th></tr></thead><tbody>${b.agents.map(x => row('agent', x)).join('')}</tbody></table>` : '<p class="help">ایجنتی نیست.</p>'}`;
+}
+async function loadBudgets() { try { U.budgets = await api('/budgets'); } catch (e) { window.toast(e.message, true); } render(); }
 function bind() {
   const el = U.el;
-  el.querySelectorAll('[data-utab]').forEach(b => b.onclick = () => { U.tab = b.dataset.utab; render(); });
+  el.querySelectorAll('[data-bkind]').forEach(i => i.onchange = async () => {
+    const v = Math.max(0, +i.value || 0);
+    try {
+      if (i.dataset.bkind === 'project') { const p = U.budgets.projects.find(x => x.id === i.dataset.bid); await api(`/projects/${p.id}/settings`, { body: { settings: { ...(p.override || {}), projectBudgetUsd: v } } }); }
+      else { const list = await api('/subagents'); const a = list.find(x => x.id === i.dataset.bid); if (!a) throw new Error('ایجنت پیدا نشد'); await api('/subagents', { body: { ...a, budgetMonthUsd: v } }); }
+      window.toast(v ? 'سقف ماهانه ذخیره شد' : 'سقف برداشته شد'); loadBudgets();
+    } catch (e) { window.toast(e.message, true); }
+  });
+  el.querySelectorAll('[data-utab]').forEach(b => b.onclick = () => { U.tab = b.dataset.utab; render(); if (U.tab === 'budget') loadBudgets(); });
   el.querySelectorAll('[data-perm]').forEach(c => c.onchange = async () => {
     try { const out = await api('/settings', { body: { [c.dataset.perm]: c.checked } }); if (window.JARVIS_STATE) window.JARVIS_STATE.settings = out; window.toast(c.checked ? 'اجازه داده شد' : 'خاموش شد'); } catch (e) { window.toast(e.message, true); c.checked = !c.checked; }
   });

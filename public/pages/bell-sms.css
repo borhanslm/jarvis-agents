@@ -170,3 +170,13 @@ button.bell-item:hover, button.bell-item:focus-visible { background: var(--color
 .au-t { white-space: nowrap; }
 .au-d { max-width: 520px; overflow-wrap: anywhere; color: var(--color-fg-muted); }
 .au-table .bad-row td { background: color-mix(in srgb, var(--color-danger, #e33) 7%, transparent); }
+
+.au-total { margin: 10px 0; }
+.au-btable td { vertical-align: middle; }
+.au-bw { min-width: 160px; }
+.au-bar { height: 8px; border-radius: 4px; background: var(--color-surface-3, #223); overflow: hidden; }
+.au-bar i { display: block; height: 100%; background: var(--color-primary); }
+.au-bar.warn i { background: var(--color-warning, #f5a524); }
+.au-bar.full i { background: var(--color-danger, #e33); }
+.au-in { display: inline-flex; align-items: center; gap: 4px; }
+.au-in input { width: 90px; }

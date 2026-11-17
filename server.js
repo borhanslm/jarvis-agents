@@ -69,7 +69,11 @@ orch.authMethod = claudeAuthMethod;
 const { Providers, PRESETS } = require('./lib/providers');
 const providers = new Providers(DATA, setup.secrets);
 orch.resolveProvider = spec => providers.resolve(spec);
-orch.chatLLM = o => chatLLM(o); // for models that only chat (lib/mini-agent.js)
+orch.chatLLM = o => chatLLM(o);
+// budgets: a notice when one is close to its end (once a day each) or used up
+const budgetSaid = new Map();
+orch.onBudget = b => { const k = b.kind + ':' + b.name + ':' + (b.warn ? 'w' : 'x'); if (Date.now() - (budgetSaid.get(k) || 0) < 864e5) return; budgetSaid.set(k, Date.now());
+  notices.add({ kind: 'system', title: `${b.warn ? 'بودجه‌ی' : 'بودجه‌ی تمام‌شده‌ی'} ${b.kind === 'agent' ? 'ایجنت' : 'پروژه'} «${b.name}»: $${b.spent.toFixed(2)} از $${b.budget.toFixed(2)}`, body: b.warn ? 'بیش از ۸۰٪ بودجه‌ی این ماه مصرف شده.' : 'کار تازه شروع نمی‌شود تا بودجه را بیشتر کنید.', section: 'audit', key: 'budget:' + k }); }; // for models that only chat (lib/mini-agent.js)
 // who can take a part of a split job: Claude Code, Codex and the connected coding providers
 orch.splitEngines = () => {
   const { which } = require('./lib/agents'), out = [];
@@ -1191,6 +1195,13 @@ async function api(req, res, url) {
         return send(res, 200, require('./lib/skill-tools').stageFiles(files, `https://github.com/${repo}/tree/${branch}/${dir}`.replace(/\/$/, '')));
       }
     } catch (e) { return send(res, 400, { error: e.message }); }
+  }
+  if (parts[0] === 'budgets' && m === 'GET') {
+    return send(res, 200, {
+      projects: store.projects().map(p => ({ id: p.id, name: p.name, spent: usage.monthCost({ projectId: p.id }), budget: +store.settings(p.id).projectBudgetUsd || 0, override: p.settings || {} })),
+      agents: store.subagents().map(a => ({ id: a.id, name: a.name, icon: a.icon, spent: usage.monthCost({ sub: a.id }), budget: +a.budgetMonthUsd || 0 })),
+      total: usage.monthCost(), runCap: +store.settings().maxRunCostUsd || 0,
+    });
   }
   if (parts[0] === 'audit') {
     const f = { who: url.searchParams.get('who') || '', q: url.searchParams.get('q') || '', failed: url.searchParams.get('failed') === '1', month: url.searchParams.get('month') || '' };
