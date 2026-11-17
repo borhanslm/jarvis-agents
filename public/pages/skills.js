@@ -5,7 +5,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const ic = (n, c = '') => `<svg class="ic ${c}" aria-hidden="true"><use href="icons.svg#i-${n}"/></svg>`;
 const faN = n => Number(n).toLocaleString('fa-IR');
 const api = (p, o) => window.api(p, o);
-const SRC = { custom: 'ساخت شما', imported: 'وارد‌شده', uploaded: 'آپلودشده', voice: 'یادگرفته با صدا', video: 'یادگرفته از ویدیو' };
+const SRC = { custom: 'ساخت شما', imported: 'وارد‌شده', uploaded: 'آپلودشده', voice: 'یادگرفته با صدا', video: 'یادگرفته از ویدیو', internet: 'از اینترنت' };
 
 const K = { el: null, list: [], edit: null, preview: null, busy: false, vid: null };
 function enter(host) { K.el = host; load(); }

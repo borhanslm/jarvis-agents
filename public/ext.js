@@ -82,14 +82,63 @@ function extDialog(tab) {
   const tabs = `<div class="ext-tabs" role="tablist">
     <button type="button" role="tab" class="${extTab === 'connectors' ? 'on' : ''}" data-exttab="connectors">${ic('plug', 'sm')}اتصال‌دهنده‌ها (MCP)</button>
     <button type="button" role="tab" class="${extTab === 'plugins' ? 'on' : ''}" data-exttab="plugins">${ic('puzzle', 'sm')}پلاگین‌ها</button>
-    <button type="button" role="tab" class="${extTab === 'skills' ? 'on' : ''}" data-exttab="skills">${ic('graduation-cap', 'sm')}اسکیل‌ها</button></div>`;
+    <button type="button" role="tab" class="${extTab === 'skills' ? 'on' : ''}" data-exttab="skills">${ic('graduation-cap', 'sm')}اسکیل‌ها</button>
+    <button type="button" role="tab" class="${extTab === 'search' ? 'on' : ''}" data-exttab="search">${ic('globe', 'sm')}جستجو در اینترنت</button></div>`;
   dialog(`<div class="dlg-scroll"><h3>${ic('puzzle')}اتصال‌دهنده‌ها، پلاگین‌ها و اسکیل‌ها</h3>${tabs}<div id="extBody" class="ext-body">${extBodyHtml()}</div></div>
     <div class="dlg-actions"><button class="btn ghost" value="cancel">بستن</button></div>`, true);
   $('#dlgBody').onclick = extClick;
   if (extTab === 'skills') loadSkills();
 }
 window.extDialog = extDialog;
-const extBodyHtml = () => extTab === 'connectors' ? connectorsHtml() : extTab === 'skills' ? skillsHtml() : pluginsHtml();
+const extBodyHtml = () => extTab === 'connectors' ? connectorsHtml() : extTab === 'skills' ? skillsHtml() : extTab === 'search' ? searchHtml() : pluginsHtml();
+
+// ---------- search the internet: MCP Registry, skills on GitHub, plugins — nothing installs before you review it ----------
+const NS = { q: '', kind: 'all', busy: false, items: null, errors: [], picks: null, preview: null };
+const KIND_FA = { mcp: ['plug', 'اتصال‌دهنده (MCP)'], skill: ['graduation-cap', 'اسکیل'], plugin: ['puzzle', 'پلاگین'] };
+function searchHtml() {
+  if (NS.preview) return skillPreviewHtml(NS.preview);
+  const kinds = [['all', 'همه'], ['mcp', 'اتصال‌دهنده (MCP)'], ['skill', 'اسکیل'], ['plugin', 'پلاگین']];
+  const res = NS.busy ? '<div class="help empty-note">در حال جستجو…</div>' : NS.items == null ? '' : NS.items.length ? NS.items.map((it, i) => `<div class="ext-row">
+      <span class="ext-ic">${ic(KIND_FA[it.kind][0])}</span>
+      <div class="ext-main"><b dir="auto">${esc(it.name)}</b>
+        <div class="ext-roles"><span class="role on">${KIND_FA[it.kind][1]}</span><span class="role">${esc(it.source)}</span>${it.stars ? `<span class="role" dir="ltr">★ ${fa(it.stars)}</span>` : ''}</div>
+        <div class="help" dir="auto">${esc(it.description || '')}</div>
+        ${it.kind === 'mcp' ? `<code class="cn-cmd" dir="ltr">${esc(it.install.type === 'http' ? it.install.url : [it.install.command, ...it.install.args].join(' '))}</code>` : ''}
+        ${it.url ? `<a class="help" href="${esc(it.url)}" target="_blank" rel="noopener" dir="ltr">${ic('external-link', 'sm')} ${esc(it.url.replace(/^https:\/\//, ''))}</a>` : ''}
+        ${NS.picks && NS.picks.i === i ? `<div class="ns-picks">${NS.picks.list.length ? NS.picks.list.slice(0, 60).map((sk, j) => `<button type="button" class="btn small" data-nspick="${j}">${ic('download', 'sm')}${esc(sk.name)}</button>`).join('') : '<span class="help">در این مخزن SKILL.md پیدا نشد.</span>'}</div>` : ''}</div>
+      <div class="ext-acts"><button type="button" class="btn small primary" data-nsget="${i}">${ic('eye', 'sm')}بررسی و نصب</button></div></div>`).join('')
+    : '<div class="help empty-note">چیزی پیدا نشد؛ با کلمه‌های انگلیسی امتحان کنید (مثلاً pdf، notion، ui ux).</div>';
+  return `<p class="help">${ic('info', 'sm')} در فهرست رسمی سرورهای MCP، مجموعه‌ی اسکیل‌های رسمی، GitHub و مارکت‌پلیس پلاگین‌های Claude جستجو می‌کند. <b>چیزی خودکار نصب نمی‌شود:</b> اول فرمان، آدرس یا فایل‌هایش را می‌بینید و بعد تصمیم می‌گیرید.</p>
+    <div class="pl-install" id="nsForm"><input id="nsQ" dir="auto" value="${esc(NS.q)}" placeholder="مثلاً: pdf، notion، ui ux pro max، google maps" aria-label="جستجو">
+      <select id="nsKind" aria-label="نوع">${kinds.map(([k, l]) => `<option value="${k}" ${NS.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <button type="button" class="btn primary small" id="nsGo" ${NS.busy ? 'disabled' : ''}>${ic('search', 'sm')}جستجو</button></div>
+    ${NS.errors.length ? `<p class="warn help">${ic('triangle-alert', 'sm')}${esc(NS.errors.join(' — '))}</p>` : ''}
+    <div class="ext-list">${res}</div>`;
+}
+function skillPreviewHtml(p) {
+  return `<div class="cn-form"><h4>${ic('eye', 'sm')}پیش‌نمایش اسکیل: <span dir="ltr">${esc(p.name)}</span></h4>
+    <p class="help" dir="auto">${esc(p.description || '(بدون توضیح)')}</p>
+    ${p.origin ? `<a class="help" href="${esc(p.origin)}" target="_blank" rel="noopener" dir="ltr">${ic('external-link', 'sm')} ${esc(p.origin.replace(/^https:\/\//, ''))}</a>` : ''}
+    <div class="help">${fa(p.fileCount)} فایل: <span dir="ltr">${p.files.slice(0, 14).map(esc).join('، ')}${p.fileCount > 14 ? '، …' : ''}</span></div>
+    ${p.runnable.length ? `<div class="warn">${ic('triangle-alert', 'sm')}این اسکیل فایل‌های اجرایی دارد (<span dir="ltr">${p.runnable.slice(0, 6).map(esc).join('، ')}</span>). فقط اگر به منبعش اعتماد دارید نصب کنید؛ ایجنت‌ها ممکن است آن‌ها را اجرا کنند.</div>` : ''}
+    <details><summary>متن SKILL.md</summary><pre class="sk-pre" dir="auto">${esc(p.body)}</pre></details>
+    <div class="row-gap"><button type="button" class="btn primary" id="nsInstall">${ic('download', 'sm')}نصب در کتابخانه</button><button type="button" class="btn ghost" id="nsBack">بازگشت به نتایج</button></div></div>`;
+}
+async function nsSearch() {
+  if (NS.q.trim().length < 2) return toast('چه چیزی جستجو شود؟', true);
+  NS.busy = true; NS.items = null; NS.picks = null; NS.preview = null; window.onExtChanged();
+  try { const r = await api(`/ext-search?q=${encodeURIComponent(NS.q.trim())}&kind=${NS.kind}`, { timeout: 60000 }); NS.items = r.items; NS.errors = r.errors || []; }
+  catch (e) { NS.items = []; NS.errors = [e.message]; }
+  NS.busy = false; window.onExtChanged();
+}
+async function nsStage(repo, branch, dir) {
+  toast('در حال گرفتن فایل‌های اسکیل…');
+  try { NS.preview = await api('/ext-search/stage', { body: { repo, branch, dir }, timeout: 120000 }); window.onExtChanged(); } catch (e) { toast(e.message, true); }
+}
+// Enter in the search box
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target && e.target.id === 'nsQ') { e.preventDefault(); NS.q = e.target.value; NS.kind = $('#nsKind').value; nsSearch(); } });
+window.extSearch = (q, kind) => { NS.q = q || ''; NS.kind = kind || 'all'; extDialog('search'); if (NS.q) nsSearch(); };
+window.addEventListener('jarvis:ev', e => { const d = e.detail || {}; if (d.type === 'extSearch') window.extSearch(d.query, d.kind); });
 
 // ---------- skills (the full editor is the Skills page; this tab lists them and starts the common actions) ----------
 let skillList = null;
@@ -97,7 +146,7 @@ async function loadSkills() {
   try { skillList = await api('/skills'); } catch { skillList = skillList || []; }
   const b = document.getElementById('extBody'); if (b && extTab === 'skills' && $('#dlg').open) b.innerHTML = skillsHtml();
 }
-const SK_SRC = { custom: 'ساخت شما', imported: 'وارد‌شده', uploaded: 'آپلودشده', voice: 'یادگرفته با صدا' };
+const SK_SRC = { custom: 'ساخت شما', imported: 'وارد‌شده', uploaded: 'آپلودشده', voice: 'یادگرفته با صدا', video: 'یادگرفته از ویدیو', internet: 'از اینترنت' };
 function skillsHtml() {
   const list = skillList;
   const rows = list == null ? '<div class="help empty-note">در حال خواندن…</div>' : list.length ? list.map(s => `<div class="ext-row">
@@ -148,6 +197,7 @@ function connectorForm(c) {
       <input type="password" data-cnsecret="${esc(s.name)}" dir="ltr" autocomplete="off" placeholder="${s.set ? 'ذخیره شده — برای تغییر مقدار جدید وارد کنید' : ''}"></div>`).join('');
   $('#extBody').innerHTML = `<div id="cnForm" class="cn-form">
     <h4>${isNew ? 'اتصال‌دهنده‌ی جدید' : 'ویرایش اتصال‌دهنده'}</h4>
+    ${c.fromNet ? `<div class="warn">${ic('triangle-alert', 'sm')} این اتصال‌دهنده از اینترنت پیدا شده (<span dir="ltr">${esc(c.fromNet)}</span>). فرمان یا آدرسش را ببینید؛ فقط اگر به سازنده‌اش اعتماد دارید ذخیره کنید. پیش‌فرض فقط به «سازنده» داده می‌شود.</div>` : ''}
     <div class="field-row"><div class="field" style="flex:0 0 70px"><label>آیکون</label><input id="cnIcon" value="${esc(c.icon || '🔌')}" maxlength="4"></div>
       <div class="field"><label>نام</label><input id="cnName" value="${esc(c.name || '')}" dir="auto"></div></div>
     <div class="field"><label>نوع</label><select id="cnType"><option value="stdio">برنامه‌ی محلی (فرمان)</option><option value="http">آدرس اینترنتی (HTTP)</option></select></div>
@@ -221,6 +271,26 @@ async function extClick(e) {
   const t = e.target;
   const tab = t.closest('[data-exttab]'); if (tab) { extDialog(tab.dataset.exttab); return; }
   if (t.closest('[data-openmail]')) { $('#dlg').close(); window.showSection && window.showSection('mail'); return; }
+  if (t.closest('#nsGo')) { NS.q = $('#nsQ').value; NS.kind = $('#nsKind').value; nsSearch(); return; }
+  const nsg = t.closest('[data-nsget]');
+  if (nsg) {
+    const i = +nsg.dataset.nsget, it = NS.items[i];
+    if (it.kind === 'mcp') { connectorForm({ name: it.name.slice(0, 40), desc: it.description.slice(0, 200), icon: '🌐', type: it.install.type, command: it.install.command, args: it.install.args, url: it.install.url, secrets: (it.install.secrets || []).map(x => ({ ...x, set: false })), roles: { builder: true, reviewer: false, subs: false }, fromNet: it.url || it.id }); return; }
+    if (it.kind === 'skill') {
+      if (it.dir != null) return nsStage(it.repo, it.branch, it.dir);
+      try { const r = await api('/ext-search/skills', { body: { repo: it.repo, branch: it.branch } }); if (r.skills.length === 1) return nsStage(it.repo, it.branch, r.skills[0].dir); NS.picks = { i, list: r.skills, repo: it.repo, branch: it.branch }; window.onExtChanged(); } catch (err) { toast(err.message, true); }
+      return;
+    }
+    if (it.kind === 'plugin') {
+      if (!confirm(`پلاگین «${it.name}» از ${it.source} نصب شود؟\n\nایجنت‌ها، اسکیل‌ها و فرمان‌هایش اضافه می‌شوند؛ اتصال‌دهنده‌هایش خاموش می‌مانند تا خودتان بررسی و روشن کنید.`)) return;
+      extDialog('plugins'); $('#plUrl').value = it.install.url;
+      installPlugin(it.install.pick ? { url: it.install.url, pick: it.install.pick } : { url: it.install.url }, $('#plGit'));
+      return;
+    }
+  }
+  const nsp = t.closest('[data-nspick]'); if (nsp && NS.picks) { const sk = NS.picks.list[+nsp.dataset.nspick]; nsStage(NS.picks.repo, NS.picks.branch, sk.dir); return; }
+  if (t.closest('#nsBack')) { if (NS.preview) api('/skills/upload/cancel', { body: { token: NS.preview.token } }).catch(() => {}); NS.preview = null; window.onExtChanged(); return; }
+  if (t.closest('#nsInstall')) { try { const sk = await api('/skills/upload/confirm', { body: { token: NS.preview.token } }); toast(`اسکیل «${sk.name}» نصب شد`); NS.preview = null; window.onExtChanged(); } catch (err) { toast(err.message, true); NS.preview = null; window.onExtChanged(); } return; }
   const sko = t.closest('[data-skopen]'); if (sko) { $('#dlg').close(); window.openSkills ? window.openSkills(sko.dataset.skopen) : window.showSection && window.showSection('skills'); return; }
   const add = t.closest('[data-cnadd]');
   if (add) { const c = (S.connectorCatalog || []).find(x => x.key === add.dataset.cnadd); connectorForm(c ? { ...c, catalog: c.key, secrets: (c.secrets || []).map(s => ({ ...s, set: false })) } : { roles: { builder: true, reviewer: true, subs: false } }); return; }

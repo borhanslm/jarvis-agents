@@ -147,3 +147,8 @@
 .vd-net { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line, #8884); color: var(--muted, #aaa); font-weight: 500; }
 .vd-net[data-net="on"] { color: #3ecf8e; border-color: #3ecf8e66; }
 .vd-net[data-net="off"] { color: #f0b429; border-color: #f0b42966; }
+
+/* search the internet */
+#nsForm select { flex: 0 0 auto; }
+.ns-picks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; max-height: 220px; overflow-y: auto; }
+.ext-tabs { flex-wrap: wrap; }

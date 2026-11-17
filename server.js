@@ -656,6 +656,7 @@ async function voiceAct(a) {
     try { return { ok: true, pc: await require('./lib/pc').run(a.type, p) }; } catch (e) { return { ok: false, error: e.message }; }
   }
   if (a.type === 'mark_read') { notices.read('all'); return { ok: true }; }
+  if (a.type === 'find_extension') { const q = String(p.query || '').trim(); if (!q) return { ok: false, error: 'چه چیزی جستجو شود؟' }; broadcast({ type: 'extSearch', query: q.slice(0, 120), kind: ['skill', 'mcp', 'plugin'].includes(p.kind) ? p.kind : 'all' }); return { ok: true }; }
   if (a.type === 'send_email') {
     // only reached after the user said "yes" to the read-back (confirm: true)
     try { const r = await mail.send(p.account || '', { to: p.to, subject: p.subject, text: p.text, inReplyTo: p.inReplyTo }); notices.add({ kind: 'mail', title: 'ایمیل فرستاده شد به ' + r.to.join('، '), body: r.subject, section: 'mail' }); return { ok: true, sent: r.to }; }
@@ -1162,6 +1163,19 @@ async function api(req, res, url) {
   // ---- plain chat (any model) and the model list for it ----
   // Gemini free (Antigravity CLI): install with Google's script; sign in by running `agy` once (it opens the browser)
   // JARVIS's memory (see, add, change, forget — in the JARVIS settings)
+  // search the internet for MCP servers, skills and plugins (installed only after the user reviews them)
+  if (parts[0] === 'ext-search') {
+    try {
+      const xs = require('./lib/ext-search');
+      if (!parts[1] && m === 'GET') return send(res, 200, await xs.search(url.searchParams.get('q'), url.searchParams.get('kind') || 'all'));
+      if (parts[1] === 'skills' && m === 'POST') return send(res, 200, await xs.repoSkills(String(body.repo || ''), String(body.branch || 'main')).then(r => ({ skills: r.skills })));
+      if (parts[1] === 'stage' && m === 'POST') {
+        const repo = String(body.repo || ''), branch = String(body.branch || 'main'), dir = String(body.dir || '');
+        const files = await xs.downloadSkill(repo, branch, dir);
+        return send(res, 200, require('./lib/skill-tools').stageFiles(files, `https://github.com/${repo}/tree/${branch}/${dir}`.replace(/\/$/, '')));
+      }
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
   if (parts[0] === 'pc') {
     try {
       if (parts[1] === 'status' && m === 'GET') return send(res, 200, { running: pcJob.run ? pcJob.task : null, pending: pcJob.pending && pcJob.pending.question, steps: pcJob.steps.slice(-30) });
