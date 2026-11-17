@@ -148,9 +148,10 @@ window.addEventListener('jarvis:ev', async e => {
   if (ev.type === 'talkStart') { try { C.talk = await api('/talks/' + ev.id); } catch {} renderTalk(); busy(true); }
   if (ev.type === 'talkDelta') {
     const m = C.talk.messages[C.talk.messages.length - 1]; if (!m || m.role !== 'assistant') return;
-    m.content += ev.text;
+    m.content = ev.replace != null ? ev.replace : m.content + (ev.text || '');
     const node = $('#tkStream').lastElementChild && $('#tkStream').lastElementChild.querySelector('.tk-text');
-    if (node) { node.innerHTML = md(m.content); const box = $('#tkStream'); if (box.scrollHeight - box.scrollTop - box.clientHeight < 160) box.scrollTop = box.scrollHeight; }
+    // the action block is run by JARVIS, not shown
+    if (node) { node.innerHTML = md(m.content.replace(/```jarvis-action[\s\S]*$/, '\n\n> ⚙️ …')); const box = $('#tkStream'); if (box.scrollHeight - box.scrollTop - box.clientHeight < 160) box.scrollTop = box.scrollHeight; }
   }
   if (ev.type === 'talkDone') { try { C.talk = await api('/talks/' + ev.id); } catch {} renderTalk(); if (ev.message && ev.message.error) window.toast(ev.message.error, true); }
 });

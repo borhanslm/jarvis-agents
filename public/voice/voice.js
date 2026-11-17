@@ -533,6 +533,15 @@ window.addEventListener('jarvis:ev', e => {
   const text = f(ev.notice);
   addLog('jarvis', text); speakText(text);
 });
+// the computer agent finished, failed, or asks something: say it (and listen for the answer)
+window.addEventListener('jarvis:ev', e => {
+  const ev = e.detail; if (!ev || ev.type !== 'pcAgent') return;
+  if (ev.state === 'start' && settings().pcMinimize !== false && window.jarvisDesktop && window.jarvisDesktop.minimize && document.hasFocus()) window.jarvisDesktop.minimize(); // out of the agent's way
+  if (!['done', 'fail', 'ask', 'stopped'].includes(ev.state) || !ev.say) return;
+  addLog('jarvis', ev.say);
+  if (V.state !== 'off' && settings().voiceSpeak !== false) speakText(ev.say, { thenListen: ev.state === 'ask' });
+  else window.toast && window.toast(ev.say, ev.state === 'fail');
+});
 // reminders etc. speak through the assistant when it is on
 window.voiceSpeak = text => { if (V.state !== "off" && settings().voiceSpeak !== false) speakText(text); };
 window.voiceStart = start;

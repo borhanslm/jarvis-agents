@@ -69,12 +69,13 @@ orch.authMethod = claudeAuthMethod;
 const { Providers, PRESETS } = require('./lib/providers');
 const providers = new Providers(DATA, setup.secrets);
 orch.resolveProvider = spec => providers.resolve(spec);
+orch.chatLLM = o => chatLLM(o); // for models that only chat (lib/mini-agent.js)
 // who can take a part of a split job: Claude Code, Codex and the connected coding providers
 orch.splitEngines = () => {
   const { which } = require('./lib/agents'), out = [];
   if (which('claude').length) out.push({ id: 'claude-opus-5-5', label: 'Claude Code · Opus', note: 'strongest: architecture, tricky logic, big refactors' }, { id: 'claude-sonnet-5-5', label: 'Claude Code · Sonnet', note: 'fast, good for normal features and UI' });
   if (which('codex').length) out.push({ id: 'codex', label: 'Codex', note: 'good at backend, algorithms, tests and careful fixes' });
-  for (const p of providers.view()) if (p.hasKey && (p.kind === 'anthropic' || p.kind === 'openai')) for (const m of (p.models || []).slice(0, 2)) out.push({ id: `p:${p.id}:${m}`, label: `${p.name} · ${m}`, note: 'connected model' });
+  for (const p of providers.view()) if (p.hasKey) for (const m of (p.models || []).slice(0, 2)) out.push({ id: `p:${p.id}:${m}`, label: `${p.name} · ${m}`, note: p.kind === 'chat' ? 'connected model (through the JARVIS coding agent)' : 'connected model' });
   return out.slice(0, 10);
 };
 
@@ -137,7 +138,7 @@ function agentSpec(spec, system) {
   if (!m) return { spec, system };
   const a = store.subagents().find(x => x.id === m[1]);
   if (!a) throw new Error('ایجنت پیدا نشد');
-  const own = /^(claude-|p:|ollama:|chatgpt)/.test(a.model || '') ? a.model : (store.settings().voiceModel || 'claude-haiku-5-5');
+  const own = /^(claude-|p:|ollama:|chatgpt|kimi|agy)/.test(a.model || '') ? a.model : (store.settings().voiceModel || 'claude-haiku-5-5');
   // the agent's own instructions lead; JARVIS's general chat persona is not added on top
   const extra = system && !/^You are JARVIS/.test(system) ? '\n\n' + system : '';
   return { spec: own, system: a.prompt + extra + '\n\n(Today: ' + new Date().toDateString() + '.)' };
@@ -311,7 +312,14 @@ function sellerView() {
     totals: { count: sales.length, year: sales.filter(x => x.issuedAt > year).length, amount: sales.reduce((t, x) => t + (+x.amount || 0), 0) } };
 }
 const { Talks } = require('./lib/talks');
-const talks = new Talks(DATA, { chat: chatLLM, onEvent: ev => broadcast(ev) });
+const talks = new Talks(DATA, { chat: chatLLM, onEvent: ev => broadcast(ev), pcAllowed: () => store.settings().pcControl !== false && process.platform === 'win32',
+  // a chat model asked to act on the computer
+  act: async a => {
+    const r = await voiceAct(a);
+    if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'انجام نشد' };
+    const fa = { open_app: () => 'باز شد: ' + ((r.pc && r.pc.opened) || a.params.name || ''), open_url: () => 'در مرورگر باز شد', web_search: () => 'جستجو در مرورگر باز شد', open_folder: () => 'پوشه باز شد', volume: () => 'صدا تنظیم شد', media: () => 'انجام شد', screenshot: () => 'اسکرین‌شات ذخیره شد: ' + ((r.pc && r.pc.file) || ''), pc_do: () => 'جارویس روی کامپیوتر شروع به کار کرد؛ نتیجه را اعلام می‌کند (برای توقف، موس را تکان بدهید).' }[a.type];
+    return { ok: true, text: fa ? fa() : 'انجام شد' };
+  } });
 // No internet + an online model chosen: answer with the offline model (mode "auto" only)
 async function talkSpec(spec) {
   const s = store.settings();
@@ -361,6 +369,7 @@ const voiceContext = async (said = '') => {
     } : {}),
     ...(ASKS_SALES.test(said) && clubAdmin() && club.url() && club.token() ? { purchases: await freshPurchases() } : {}),
     ...(ASKS_MAIL.test(said) ? { mail: await mailForVoice() } : {}),
+    ...(pcJob.run || pcJob.pending ? { pc: { running: pcJob.run ? pcJob.task : null, steps: pcJob.steps.length, waiting: pcJob.pending ? pcJob.pending.question : null, task: pcJob.pending ? pcJob.pending.task : null } } : {}),
     ...(ASKS_CAL.test(said) && calendars.list.length ? { events: await eventsForVoice() } : {}),
   };
 };
@@ -576,6 +585,35 @@ function taskAction(kind, id, arg) {
 const voiceLog = [];
 const findByName = (list, name, key = 'name') => { const n = String(name || '').trim().toLowerCase(); if (!n) return null; return list.find(x => String(x[key]).toLowerCase() === n) || list.find(x => String(x[key]).toLowerCase().includes(n) || n.includes(String(x[key]).toLowerCase())) || null; };
 // Carry out the action the brain chose. Returns what happened (shown and spoken by the panel).
+// ---- the computer agent: a task inside any program (lib/pc-agent.js), in the background ----
+const pcJob = { run: null, pending: null, steps: [] };
+async function pcSpec() {
+  const s = store.settings();
+  if (s.pcAgentModel) return s.pcAgentModel;
+  return (await voiceOnline(s)) ? (s.voiceModel || 'claude-haiku-5-5') : offlineSpec(s);
+}
+function pcStop() { if (pcJob.run) { pcJob.run.abort(); pcJob.run = null; return true; } return false; }
+async function pcStart(task, { history = [], approved = [] } = {}) {
+  if (process.platform !== 'win32') throw new Error('کنترل برنامه‌ها فقط در ویندوز');
+  if (store.settings().pcControl === false) throw new Error('اجازه‌ی کنترل کامپیوتر در تنظیمات جارویس خاموش است');
+  pcStop(); pcJob.pending = null;
+  const spec = await pcSpec(); if (!spec) throw new Error('مدلی برای کنترل کامپیوتر در دسترس نیست');
+  const ctrl = new AbortController(); pcJob.run = ctrl; pcJob.steps = []; pcJob.task = task;
+  const pc = require('./lib/pc');
+  broadcast({ type: 'pcAgent', state: 'start', task });
+  require('./lib/pc-agent').runTask(task, {
+    llm: o => chatLLM({ spec, ...o }), signal: ctrl.signal, history, approved,
+    openApp: name => pc.run('open_app', { name }), openUrl: url => pc.run('open_url', { url }),
+    onStep: ev => { pcJob.steps.push(ev); broadcast({ type: 'pcAgent', state: 'step', n: ev.n, thought: ev.thought, action: ev.action }); },
+  }).then(r => {
+    if (pcJob.run !== ctrl) return; pcJob.run = null;
+    if (r.status === 'ask') pcJob.pending = { task, history: r.history, question: r.question, approved };
+    const say = r.status === 'ask' ? r.question : r.say;
+    notices.add({ kind: 'pc', title: say, body: task.slice(0, 160), key: 'pc' });
+    broadcast({ type: 'pcAgent', state: r.status, say, task });
+  }).catch(e => { if (pcJob.run === ctrl) pcJob.run = null; broadcast({ type: 'pcAgent', state: 'fail', say: 'کنترل کامپیوتر خطا داد: ' + e.message.slice(0, 160), task }); });
+  return { started: true, model: spec };
+}
 async function voiceAct(a) {
   if (!a) return null;
   const p = a.params || {};
@@ -595,7 +633,19 @@ async function voiceAct(a) {
     const running = [...orch.running.keys()].map(id => store.chat(id)).filter(Boolean);
     const target = p.chat ? [findByName(running, p.chat, 'title')].filter(Boolean) : running;
     for (const c of target) orch.stop(c.id);
-    return { ok: true, stopped: target.length };
+    const pcStopped = !p.chat && pcStop(); if (!p.chat) pcJob.pending = null;
+    return { ok: true, stopped: target.length + (pcStopped ? 1 : 0) };
+  }
+  if (a.type === 'pc_do') {
+    const task = [p.app ? `In the program "${p.app}" (open it if needed):` : '', String(p.task || p.goal || '').trim()].filter(Boolean).join(' ');
+    if (!String(p.task || p.goal || '').trim()) return { ok: false, error: 'کار مشخص نشد' };
+    try { return { ok: true, pc: await pcStart(task) }; } catch (e) { return { ok: false, error: e.message }; }
+  }
+  if (a.type === 'pc_continue') {
+    const j = pcJob.pending; if (!j) return { ok: false, error: 'کاری منتظر تأیید نیست' };
+    pcJob.pending = null;
+    if (!p.approve) return { ok: true, cancelled: true };
+    try { return { ok: true, pc: await pcStart(j.task, { history: [...j.history, `THE USER APPROVED: "${j.question}"${p.note ? ' — note: ' + String(p.note).slice(0, 200) : ''}. Continue.`], approved: [...j.approved, j.question] }) }; } catch (e) { return { ok: false, error: e.message }; }
   }
   if (a.type === 'add_task') { const d = p.due ? Date.parse(p.due) : NaN; const t = tasks.add({ title: p.title, due: Number.isFinite(d) ? new Date(d).toISOString() : null, priority: p.priority, category: p.category, repeat: p.repeat, remindBefore: p.remindBefore }, 'voice'); return { ok: true, task: t }; }
   if (a.type === 'complete_task') { const t = tasks.get(String(p.id || '')); if (!t) return { ok: false, error: 'تسک پیدا نشد' }; tasks.complete(t.id); return { ok: true, task: t }; }
@@ -1071,7 +1121,7 @@ async function api(req, res, url) {
       const t0 = Date.now();
       try {
         const s = store.settings();
-        const own = /^(claude-|p:|ollama:|chatgpt)/.test(ag.model || '') ? ag.model : (s.voiceModel || 'claude-haiku-5-5');
+        const own = /^(claude-|p:|ollama:|chatgpt|kimi|agy)/.test(ag.model || '') ? ag.model : (s.voiceModel || 'claude-haiku-5-5');
         const r = await chatLLM({ spec: String(body.model || '') || own, system: ag.prompt + '\n\n(Test run inside JARVIS: there is no file or tool access here. Follow your instructions exactly as in real use.)', messages: [{ role: 'user', content: String(body.text || '').slice(0, 8000) }], maxTokens: 1500, signal: AbortSignal.timeout(120000) });
         return send(res, 200, { ok: true, text: r.text, ms: Date.now() - t0, model: String(body.model || '') || own });
       } catch (e) { return send(res, 200, { ok: false, error: e.message, ms: Date.now() - t0 }); }
@@ -1102,6 +1152,14 @@ async function api(req, res, url) {
   // ---- plain chat (any model) and the model list for it ----
   // Gemini free (Antigravity CLI): install with Google's script; sign in by running `agy` once (it opens the browser)
   // JARVIS's memory (see, add, change, forget — in the JARVIS settings)
+  if (parts[0] === 'pc') {
+    try {
+      if (parts[1] === 'status' && m === 'GET') return send(res, 200, { running: pcJob.run ? pcJob.task : null, pending: pcJob.pending && pcJob.pending.question, steps: pcJob.steps.slice(-30) });
+      if (parts[1] === 'do' && m === 'POST') return send(res, 200, await pcStart(String(body.task || '').slice(0, 2000)));
+      if (parts[1] === 'stop' && m === 'POST') { pcStop(); pcJob.pending = null; broadcast({ type: 'pcAgent', state: 'stopped', say: 'متوقف شد.' }); return send(res, 200, { ok: true }); }
+      if (parts[1] === 'continue' && m === 'POST') return send(res, 200, await voiceAct({ type: 'pc_continue', params: { approve: !!body.approve } }));
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
   if (parts[0] === 'mail') {
     try {
       const acc = url.searchParams.get('account') || (body && body.account) || '';

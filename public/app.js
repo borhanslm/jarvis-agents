@@ -1385,9 +1385,11 @@ function modelOptions(kind, value) {
   const base = claudeModels(); // both slots can run Claude models
   const def = kind === 'claude' ? 'پیش‌فرض CLI' : `پیش‌فرض · ${prettyModel(S.codexDefaultModel) || 'CLI'}`;
   const extra = [...cm[kind], value].filter(v => v && v !== '__custom' && !base.some(([i]) => i === v));
-  const conn = (S.providers || []).filter(p => p.kind !== 'chat').flatMap(p => p.models.map(m => [`p:${p.id}:${m}`, `${p.name} · ${m}`]));
+  // every connection works in the team: coding-API ones through Claude Code / Codex, chat-only ones (Gemini, Grok, Qwen…) through JARVIS's own agent
+  const conn = (S.providers || []).flatMap(p => p.models.map(m => [`p:${p.id}:${m}`, `${p.name} · ${m}${p.kind === 'chat' ? ' (عامل جارویس)' : ''}`]));
+  const signIns = [['chatgpt', 'ChatGPT (حساب شما · Codex)'], ['kimi', 'Kimi (حساب شما)'], ['agy', 'Gemini رایگان (حساب Google)']].filter(([k]) => !conn.some(([c]) => c === k));
   const extra2 = extra.filter(v => !conn.some(([c]) => c === v));
-  return [['', def], ...base, ...conn, ...[...new Set(extra2)].map(v => [v, prettyModel(v) === v ? v : /^p:/.test(v) ? `${prettyModel(v)} (حذف‌شده)` : `${prettyModel(v)} (${v})`]), ['__custom', 'سفارشی…']];
+  return [['', def], ...base, ...conn, ...signIns, ...[...new Set(extra2)].filter(v => !signIns.some(([k]) => k === v)).map(v => [v, prettyModel(v) === v ? v : /^p:/.test(v) ? `${prettyModel(v)} (حذف‌شده)` : `${prettyModel(v)} (${v})`]), ['__custom', 'سفارشی…']];
 }
 const CLAUDE_MODELS = claudeModels;
 const CLAUDE_EFFORT = [['low', 'فکر: کم'], ['medium', 'فکر: متوسط'], ['high', 'فکر: زیاد'], ['xhigh', 'فکر: خیلی زیاد'], ['max', 'فکر: حداکثر']];

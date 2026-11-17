@@ -6,7 +6,7 @@ const ic = (n, c = '') => `<svg class="ic ${c}" aria-hidden="true"><use href="ic
 const faN = n => Number(n).toLocaleString('fa-IR');
 const api = (p, o) => window.api(p, o);
 const ago = ms => { if (!ms) return ''; const s = Math.round((Date.now() - ms) / 1000); return s < 90 ? 'همین الان' : s < 3600 ? faN(Math.round(s / 60)) + ' دقیقه پیش' : s < 86400 ? faN(Math.round(s / 3600)) + ' ساعت پیش' : new Date(ms).toLocaleDateString('fa-IR'); };
-const KIND = { reminder: ['clock', 'یادآوری'], job: ['code', 'کار ایجنت‌ها'], sale: ['wallet', 'فروش'], phone: ['smartphone', 'گوشی'], sms: ['message-square', 'پیامک'], mail: ['mail', 'ایمیل'], calendar: ['calendar', 'تقویم'], notification: ['bell', 'اعلان'], system: ['info', 'جارویس'] };
+const KIND = { reminder: ['clock', 'یادآوری'], job: ['code', 'کار ایجنت‌ها'], sale: ['wallet', 'فروش'], phone: ['smartphone', 'گوشی'], sms: ['message-square', 'پیامک'], mail: ['mail', 'ایمیل'], pc: ['monitor', 'کنترل کامپیوتر'], calendar: ['calendar', 'تقویم'], notification: ['bell', 'اعلان'], system: ['info', 'جارویس'] };
 
 const B = { open: false, tab: 'jarvis', list: [], unread: 0, phone: null };
 

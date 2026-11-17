@@ -186,7 +186,12 @@ async function tabGeneral(el) {
   const s = st().settings || {}, ol = P.vs.ollama || { models: [] };
   let mics = []; try { mics = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput' && d.deviceId !== 'communications'); } catch {}
   const micOk = !s.voiceMicId || mics.some(m => m.deviceId === s.voiceMicId);
-  const models = window.modelOptions ? window.modelOptions('claude', s.voiceModel).filter(([k]) => k && k !== '__custom') : [[s.voiceModel, s.voiceModel]];
+  // every model JARVIS can talk to: Claude, ChatGPT (your sign-in), Gemini, Kimi, Grok, Qwen, DeepSeek, OpenRouter… (AI Core)
+  let all = []; try { all = (await window.api('/llms')).filter(m => !m.voice && !m.agent && !m.local); } catch {}
+  const cur = s.voiceModel || 'claude-haiku-5-5';
+  if (!all.some(m => m.spec === cur)) all.unshift({ spec: cur, name: cur, group: 'انتخاب فعلی', ok: true });
+  const groups = [...new Set(all.map(m => m.group))];
+  const brainOpts = groups.map(g => `<optgroup label="${esc(g)}">${all.filter(m => m.group === g).map(m => `<option value="${esc(m.spec)}" ${m.spec === cur ? 'selected' : ''} ${m.ok === false ? 'disabled' : ''}>${esc(m.name)}${m.note ? ' — ' + esc(m.note) : ''}</option>`).join('')}</optgroup>`).join('');
   el.innerHTML = `
     <section class="jvs-sec"><h3>${ic('mic', 'sm')}میکروفون</h3>
       <div class="field"><label for="gMic">کدام میکروفون</label><select id="gMic">${opts([['', 'پیش‌فرض ویندوز (پیشنهادی)'], ...mics.filter(m => m.deviceId !== 'default').map(m => [m.deviceId, m.label || 'میکروفون'])], micOk ? s.voiceMicId || '' : '')}</select>
@@ -206,8 +211,14 @@ async function tabGeneral(el) {
       <div class="row-gap jvs-lex-add"><input id="gLexH" dir="auto" placeholder="اشتباه می‌شنود (مثلاً کرم)" aria-label="کلمه‌ای که اشتباه شنیده می‌شود"><input id="gLexM" dir="auto" placeholder="درستش (مثلاً کروم)" aria-label="کلمه‌ی درست"><button type="button" class="btn btn-sm" id="gLexAdd">${ic('plus', 'sm')}افزودن</button></div></section>
     <section class="jvs-sec"><h3>${ic('brain', 'sm')}مغز جارویس</h3>
       <div class="field"><label for="gMode">آنلاین یا آفلاین</label><select id="gMode">${opts([['auto', 'خودکار — با اینترنت آنلاین، بدون اینترنت آفلاین (پیشنهادی)'], ['online', 'همیشه آنلاین'], ['offline', 'همیشه آفلاین — هیچ چیز از این کامپیوتر بیرون نمی‌رود']], s.voiceMode || 'auto')}</select></div>
-      <div class="jvs-2"><div class="field"><label for="gModel">مغز آنلاین</label><select id="gModel" dir="ltr">${opts(models, s.voiceModel)}</select></div>
+      <div class="jvs-2"><div class="field"><label for="gModel">مغز آنلاین</label><select id="gModel" dir="auto">${brainOpts}</select><div class="help">هر مدلی که در «هسته‌ی هوش مصنوعی» وصل کرده‌اید این‌جا هست: Claude، ChatGPT، Gemini، Grok، Qwen، DeepSeek، Kimi و … . مدل‌های سریع جواب صوتی را زودتر می‌دهند.</div></div>
       <div class="field"><label for="gOff">مغز آفلاین (Ollama)</label><select id="gOff" dir="ltr">${opts([['', ol.models.length ? '— انتخاب کنید —' : '— از تب «اجزای آفلاین» دانلود کنید —'], ...ol.models.map(x => [x.name, x.name])], s.voiceModelOffline || '')}</select></div></div></section>
+    <section class="jvs-sec"><h3>${ic('monitor', 'sm')}کنترل کامپیوتر</h3>
+      <p class="help">جارویس هر برنامه‌ی نصب‌شده را باز می‌کند و کار را داخلش انجام می‌دهد، مثل «تو اسپاتیفای گل‌های پونه‌ی سیاوش قمیشی را پخش کن» یا «تو تلگرام دسکتاپ برای علی بنویس فردا می‌آیم». صفحه را می‌بیند، کلیک و تایپ می‌کند. قبل از ارسال، خرید، پرداخت یا حذف از شما می‌پرسد. رمز و شماره‌ی کارت را هیچ‌وقت تایپ نمی‌کند. اگر موس را تکان بدهید، فوراً متوقف می‌شود.</p>
+      <label class="check"><input type="checkbox" id="gPc" ${s.pcControl !== false ? 'checked' : ''}> اجازه‌ی کنترل برنامه‌ها (موس و کیبورد)</label>
+      <label class="check"><input type="checkbox" id="gPcMin" ${s.pcMinimize !== false ? 'checked' : ''}> موقع کار، پنجره‌ی جارویس کوچک شود که جلوی دیدش را نگیرد</label>
+      <div class="field"><label for="gPcModel">مدل کنترل کامپیوتر</label><select id="gPcModel" dir="auto"><option value="" ${!s.pcAgentModel ? 'selected' : ''}>همان مغز جارویس</option>${groups.map(g => `<optgroup label="${esc(g)}">${all.filter(m => m.group === g).map(m => `<option value="${esc(m.spec)}" ${m.spec === s.pcAgentModel ? 'selected' : ''} ${m.ok === false ? 'disabled' : ''}>${esc(m.name)}</option>`).join('')}</optgroup>`).join('')}</select>
+        <div class="help">مدل‌هایی که تصویر می‌بینند (Claude، GPT، Gemini، Grok، Qwen‑VL و … با کلید API) دقیق‌ترند. بقیه فقط از فهرست دکمه‌های پنجره استفاده می‌کنند.</div></div></section>
     <div class="jvs-actions"><button type="button" class="btn btn-primary" id="gSave">${ic('save', 'sm')}ذخیره</button></div>`;
   const lex = list => { const box = $('#gLex', el); if (!box) return; box.innerHTML = list.length ? list.map(c => `<div class="jvs-row"><span dir="auto">«${esc(c.heard)}» ← <b>${esc(c.meant)}</b></span><span class="help">${fa(c.count || 1)} بار</span><button type="button" class="btn btn-sm ghost" data-lexdel="${esc(c.heard)}" aria-label="فراموش کردن ${esc(c.heard)}">${ic('trash-2', 'sm')}</button></div>`).join('') : '<p class="help">هنوز چیزی یاد نگرفته.</p>'; };
   api('/voice/lexicon').then(r => lex(r.corrections)).catch(() => lex([]));
@@ -216,7 +227,7 @@ async function tabGeneral(el) {
   $('#gMic', el).onchange = () => startMeter($('#gMic', el).value, $('#gBar', el));
   startMeter(micOk ? s.voiceMicId : '', $('#gBar', el));
   $('#gSave', el).onclick = async () => {
-    const body = { voiceMicId: $('#gMic', el).value, voiceWake: $('#gWake', el).checked, voiceWakeThreshold: +$('#gThr', el).value, voiceSpeak: $('#gSpeak', el).checked, voiceAnnounce: $('#gAnnounce', el).checked, voiceSayYes: $('#gYes', el).checked, voiceDock: $('#gDock', el).value, voiceLang: $('#gLang', el).value, voiceMode: $('#gMode', el).value, voiceModel: $('#gModel', el).value, voiceModelOffline: $('#gOff', el).value };
+    const body = { voiceMicId: $('#gMic', el).value, voiceWake: $('#gWake', el).checked, voiceWakeThreshold: +$('#gThr', el).value, voiceSpeak: $('#gSpeak', el).checked, voiceAnnounce: $('#gAnnounce', el).checked, voiceSayYes: $('#gYes', el).checked, voiceDock: $('#gDock', el).value, voiceLang: $('#gLang', el).value, voiceMode: $('#gMode', el).value, voiceModel: $('#gModel', el).value, voiceModelOffline: $('#gOff', el).value, pcControl: $('#gPc', el).checked, pcMinimize: $('#gPcMin', el).checked, pcAgentModel: $('#gPcModel', el).value };
     if (body.voiceMode === 'offline' && !body.voiceModelOffline) return window.toast('برای حالت آفلاین، یک «مغز آفلاین» انتخاب کنید.', true);
     const micChanged = body.voiceMicId !== (s.voiceMicId || '') || !micOk;
     try { await save(body); stopMeter(); V().refreshDock && V().refreshDock(); if (micChanged) await V().reloadMic(); await V().reloadWake(); window.toast('ذخیره شد'); tabGeneral(el); } catch (x) { window.toast(x.message, true); }
