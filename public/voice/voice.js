@@ -44,6 +44,7 @@ window.jarvisVoice = {
   // after the settings change: reopen the microphone / reload the wake word
   reloadMic: async () => { V.micFallback = false; if (V.stream) { stopMic(); try { await startMic(); } catch (e) { window.toast && window.toast(e.message, true); } } },
   resetYes: () => { V.yes = {}; prepareYes(); },
+  refreshDock: () => setState(V.state),
   reloadWake: async () => { if (V.state === 'off') return; const st = await api('/voice/status'); V.localStt = st.stt.local; if (settings().voiceWake !== false && st.assets.wakeword.installed) await loadWakeWord(); },
 };
 const settings = () => S.settings || {};
@@ -221,6 +222,7 @@ function doResult(res) {
   if (res.open) openSection(res.open);
   if (res.chatId) window.selectProject && res.projectId && window.selectProject(res.projectId), window.openChat && window.openChat(res.chatId);
   if (res.task) window.toast && window.toast('تسک: ' + res.task.title);
+  if (res.skill) window.toast && window.toast('یاد گرفتم: «' + (res.skill.when || res.skill.name) + '» — در «اسکیل‌ها» هست');
   if (res.memory) window.toast && window.toast('به خاطر سپردم: ' + res.memory.text);
 }
 function openSection(o) {
@@ -294,7 +296,9 @@ const STATE_FA = { off: 'خاموش', idle: 'منتظر «جارویس»', recor
 function setState(s, hint) {
   V.state = s;
   const el = ui();
-  el.hidden = s === 'off';
+  // the small floating JARVIS panel on other pages: off by default (Settings → JARVIS → «پنجره‌ی شناور»)
+  const dock = settings().voiceDock || 'off';
+  el.hidden = s === 'off' || dock === 'off' || (dock === 'active' && s === 'idle');
   el.dataset.state = s;
   el.querySelector('#vdState').textContent = STATE_FA[s] + (s === 'idle' && settings().voiceWake === false ? '' : '');
   if (s === 'idle' && settings().voiceWake === false) el.querySelector('#vdState').textContent = 'آماده — Ctrl+Space یا دکمه‌ی میکروفون';

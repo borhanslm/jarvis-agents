@@ -350,6 +350,7 @@ const voiceContext = async (said = '') => {
     upcoming: (() => { const end = new Date(); end.setHours(23, 59, 59, 999); const from = end.getTime(), to = from + 7 * 864e5; return tasks.all().filter(t => !t.done && t.due && t.due > from && t.due <= to).sort((a, b) => a.due - b.due).slice(0, 25); })(),
     admin: clubAdmin() && !!(club.url() && club.token()),
     memories: memory.recall(said).map(m => ({ kind: m.kind, text: m.text })),
+    routines: skills.all().filter(k => k.source === 'voice').slice(-12).map(k => { const g = skills.get(k.id) || {}; const b = String(g.body || ''); return { name: k.name, when: (/## When\s*\n+([^\n]+)/.exec(b) || [])[1] || k.description, steps: b.replace(/^[\s\S]*?## Steps\s*\n/, '').replace(/\n+/g, ' ').slice(0, 500) }; }),
     ...(ASKS_MESSAGES.test(said) ? {
       notices: notices.list.filter(n => !n.read).slice(-12).reverse().map(n => ({ kind: n.kind, title: n.title.replace(/[⁨⁩]/g, ''), body: n.body, ago: agoFa(n.at) })),
       phoneLinked: phonePaired(),
@@ -545,6 +546,19 @@ async function voiceAct(a) {
     try { return { ok: true, pc: await require('./lib/pc').run(a.type, p) }; } catch (e) { return { ok: false, error: e.message }; }
   }
   if (a.type === 'mark_read') { notices.read('all'); return { ok: true }; }
+  if (a.type === 'teach_skill') {
+    const steps = (Array.isArray(p.steps) ? p.steps : String(p.steps || '').split(/\n|؛|;/)).map(x => String(x).trim()).filter(Boolean).slice(0, 20);
+    if (!steps.length) return { ok: false, error: 'مرحله‌ای گفته نشد' };
+    let name = String(p.name || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'routine-' + Date.now().toString(36);
+    const when = String(p.when || '').trim().slice(0, 200);
+    const old = skills.all().find(k => k.name === name && k.source === 'voice');
+    if (!old && skills.all().some(k => k.name === name)) name += '-' + Date.now().toString(36).slice(-3);
+    try {
+      const k = skills.save({ id: old && old.id, name, description: `Routine taught by voice. Use when the user says: ${when || name}`, content: `## When\n${when || name}\n\n## Steps\n${steps.map((x, i) => `${i + 1}. ${x}`).join('\n')}\n` });
+      k.source = 'voice'; skills._save(); broadcast({ type: 'skills', skills: skills.all() });
+      return { ok: true, skill: { id: k.id, name: k.name, when } };
+    } catch (e) { return { ok: false, error: e.message }; }
+  }
   if (a.type === 'remember') { const m = memory.add({ text: p.text, kind: p.kind, source: 'user' }); return m ? { ok: true, memory: { id: m.id, text: m.text, kind: m.kind } } : { ok: false, error: 'چیزی برای به خاطر سپردن نبود' }; }
   if (a.type === 'forget') { const gone = memory.forget(p.what); return { ok: true, forgot: gone.length }; }
   if (a.type === 'approve_purchase' || a.type === 'reject_purchase') {
@@ -939,6 +953,19 @@ async function api(req, res, url) {
       if (!parts[1] && m === 'GET') return send(res, 200, skills.all());
       if (parts[1] === 'installed' && m === 'GET') return send(res, 200, skills.discover(store.projects().map(p => p.path)));
       if (parts[1] === 'import' && m === 'POST') { const s = skills.importDir(body.dir); changed(); return send(res, 200, s); }
+      // write a skill with AI from a description (shown in the editor; saved only when the user saves)
+      if (parts[1] === 'draft' && m === 'POST') {
+        const st = store.settings(), tools = require('./lib/skill-tools');
+        const spec = (await voiceOnline(st)) ? (st.voiceModel || 'claude-haiku-5-5') : offlineSpec(st);
+        if (!spec) throw new Error('مدلی برای نوشتن اسکیل در دسترس نیست («هسته‌ی هوش مصنوعی»)');
+        const idea = String(body.idea || '').trim().slice(0, 4000); if (idea.length < 8) throw new Error('توضیح بدهید اسکیل چه کار کند');
+        const r = await chatLLM({ spec, system: tools.DRAFT_SYSTEM, messages: [{ role: 'user', content: tools.draftPrompt(idea) }], maxTokens: 2500, temperature: 0.3, json: true, signal: AbortSignal.timeout(180000) });
+        return send(res, 200, tools.parseDraft(r.text));
+      }
+      // upload: SKILL.md or .zip -> preview first, install only after "yes"
+      if (parts[1] === 'upload' && !parts[2] && m === 'POST') return send(res, 200, await require('./lib/skill-tools').stageUpload(body));
+      if (parts[1] === 'upload' && parts[2] === 'confirm' && m === 'POST') { const s = require('./lib/skill-tools').confirmUpload(skills, body.token); changed(); return send(res, 200, s); }
+      if (parts[1] === 'upload' && parts[2] === 'cancel' && m === 'POST') { require('./lib/skill-tools').cancelUpload(body.token); return send(res, 200, { ok: true }); }
       if (!parts[1] && m === 'POST') { const s = skills.save(body); changed(); return send(res, 200, s); }
       if (parts[1] && m === 'GET') { const s = skills.get(parts[1]); return s ? send(res, 200, s) : send(res, 404, { error: 'اسکیل پیدا نشد' }); }
       if (parts[1] && m === 'DELETE') {
