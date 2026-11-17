@@ -24,6 +24,9 @@ test('Kimi: plain answer through the CLI; model choice; sign-in error is clear',
   process.env.FAKE_KIMI = 'nologin';
   await assert.rejects(kimi.chat({ messages: [{ role: 'user', content: 'x' }] }), /وارد حساب Kimi/);
   delete process.env.FAKE_KIMI;
+  // Kimi's real answer when the account has no Kimi Code plan
+  const e = kimi.explain('kimi version 2.5.3\nerror: failed to run prompt: provider.auth_error: Your current subscription does not have access to Kimi Code right now. Upgrade your plan', 1);
+  assert.equal(e.subscription, true); assert.match(e.message, /اشتراک/); assert.match(e.raw, /subscription/);
   // through lib/llm.js like any other model
   const llm = require('../lib/llm');
   const out = await llm.chat({ spec: 'kimi', messages: [{ role: 'user', content: 'سلام' }], system: 'تو جارویس هستی' });

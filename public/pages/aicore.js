@@ -82,7 +82,14 @@ document.addEventListener('click', async e => {
       let n = 0; const iv = setInterval(async () => { n++; const s = await api('/kimi/status').catch(() => ({})); if (s.installed || n > 40) { clearInterval(iv); if (s.installed) { window.toast('Kimi Code نصب شد'); render(); } } }, 6000);
       return;
     }
-    if (t.dataset.kimi === 'login') { await api('/kimi/login', { body: {} }); window.toast('پنجره‌ی ورود Kimi باز شد: لینک را باز کنید، وارد شوید و کد را وارد کنید. بعد «آزمایش» را بزنید.'); return; }
+    if (t.dataset.kimi === 'login') {
+      t.disabled = true; window.toast('در حال بررسی ورود Kimi…');
+      try {
+        const r = await api('/kimi/login', { body: {} });
+        window.toast(r.already ? 'شما از قبل وارد حساب Kimi هستید. حالا «آزمایش» را بزنید؛ اگر Kimi اشتراک بخواهد، پیامش را می‌بینید.' : 'پنجره‌ی ورود Kimi باز شد: لینک را باز کنید، وارد شوید و کد را وارد کنید. بعد «آزمایش» را بزنید.');
+      } finally { t.disabled = false; }
+      return;
+    }
     if (t.dataset.test) {
       const spec = t.dataset.test; tests[spec] = 'wait';
       const out = el.querySelector(`[data-res="${CSS.escape(spec)}"]`); if (out) out.innerHTML = testHtml('wait');

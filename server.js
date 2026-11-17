@@ -899,6 +899,9 @@ async function api(req, res, url) {
     }
     if (parts[1] === 'login' && m === 'POST') {
       const k = kimi.kimiCli(true); if (!k) return send(res, 400, { error: 'اول Kimi Code را نصب کنید' });
+      // already signed in: say so (Kimi then finishes at once and no browser opens)
+      const st0 = await kimi.loginState();
+      if (st0.loggedIn) return send(res, 200, { ok: true, already: true, account: st0.account });
       const ok = openTerminal(`Write-Host "Sign in to Kimi: open the link, sign in, enter the code."; & '${(k.cmd).replace(/'/g, "''")}' ${k.pre.map(x => `'${x.replace(/'/g, "''")}'`).join(' ')} login; Write-Host ""; Write-Host "Done. You can close this window."`);
       return send(res, 200, { ok });
     }
