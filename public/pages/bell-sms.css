@@ -182,3 +182,18 @@ button.bell-item:hover, button.bell-item:focus-visible { background: var(--color
 .au-in input { width: 90px; }
 
 .resume-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--color-warning, #f5a524); border-radius: 10px; margin: 12px 0; }
+
+/* knowledge base */
+.kb-ask, .kb-folders { display: grid; gap: 10px; margin-bottom: 12px; }
+.kb-ask .sk-ai-row { display: flex; gap: 8px; }
+.kb-ask input { flex: 1; }
+.kb-answer { padding: 12px 14px; border-radius: 10px; background: var(--color-surface-2); line-height: 1.9; }
+.kb-hits { display: grid; gap: 8px; padding-inline-start: 20px; }
+.kb-hits p { margin: 4px 0 0; }
+.kb-fl { list-style: none; padding: 0; display: grid; gap: 6px; }
+.kb-fl li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--color-border-subtle); border-radius: 8px; }
+.kb-files { list-style: none; padding: 0; columns: 2 280px; font-size: 13px; }
+.kb-files li { display: flex; justify-content: space-between; gap: 8px; break-inside: avoid; padding: 2px 0; }
+.kb-files li.bad span { opacity: .6; }
+.tk-kb { white-space: nowrap; font-size: 13px; }
+.tk-src { margin-top: 6px; font-size: 12px; }

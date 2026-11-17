@@ -28,6 +28,7 @@ function build() {
     <section class="tk-main">
       <header class="tk-head"><h2 id="tkTitle" dir="auto" title="برای تغییر نام دوبار کلیک کنید"></h2>
         <select id="tkModel" dir="ltr" aria-label="مدل"></select>
+        <label class="check tk-kb" title="جواب‌ها از اسناد خودتان («پایگاه دانش») هم کمک بگیرند"><input type="checkbox" id="tkKb"> ${ic('book-open', 'sm')} از اسناد من</label>
         <button type="button" class="icon-btn" id="tkExport" title="خروجی Markdown" aria-label="خروجی">${ic('download')}</button>
         <button type="button" class="icon-btn" id="tkDel" title="حذف گفتگو" aria-label="حذف">${ic('trash-2')}</button></header>
       <div class="tk-stream" id="tkStream" aria-live="polite"></div>
@@ -46,6 +47,7 @@ function build() {
   inp.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMsg(); } });
   inp.addEventListener('input', () => { inp.style.height = 'auto'; inp.style.height = Math.min(220, inp.scrollHeight) + 'px'; });
   $('#tkStop').onclick = () => C.talk && api(`/talks/${C.talk.id}/stop`, { body: {} });
+  $('#tkKb').onchange = async e => { if (!C.talk) { e.target.checked = false; return window.toast('اول یک گفتگو باز کنید', true); } C.talk.kb = e.target.checked; try { await api('/talks/' + C.talk.id, { body: { kb: e.target.checked } }); window.toast(e.target.checked ? 'جواب‌ها از اسناد شما هم کمک می‌گیرند' : 'خاموش شد'); } catch (err) { window.toast(err.message, true); } };
   $('#tkModel').onchange = async e => { lsSet('jarvis.chatModel', e.target.value); if (C.talk) { C.talk.model = e.target.value; try { await api('/talks/' + C.talk.id, { body: { model: e.target.value } }); } catch {} } foot(); };
   $('#tkDel').onclick = async () => { if (!C.talk || !confirm('این گفتگو حذف شود؟')) return; await api('/talks/' + C.talk.id, { method: 'DELETE' }); C.talk = null; lsSet('jarvis.talk', ''); loadAll(); };
   $('#tkExport').onclick = async () => {
@@ -105,12 +107,14 @@ function msgHtml(m, i, last) {
   const meta = [m.model && nice(m.model), m.via && m.via !== m.model ? 'آفلاین: ' + m.via.replace(/^ollama:/, '') : '', m.ms && !m.pending ? faN((m.ms / 1000).toFixed(1)) + ' ثانیه' : '', m.stopped ? 'متوقف شد' : ''].filter(Boolean).join(' · ');
   return `<div class="tk-msg bot ${m.error ? 'err' : ''}" data-i="${i}"><div class="tk-av">${ic('sparkles', 'sm')}</div><div class="tk-body">
     <div class="tk-text md">${m.error ? `<p class="bad">${esc(m.error)}</p>` : m.pending && !m.content ? '<span class="tk-dots"><i></i><i></i><i></i></span>' : md(m.content)}</div>
+    ${m.sources && m.sources.length ? `<div class="tk-src help">${ic('book-open', 'sm')} منبع‌ها: ${m.sources.map(x => `<span title="${esc(x.file)}">[${x.n}] ${esc(x.name)}</span>`).join(' · ')}</div>` : ''}
     <div class="tk-meta"><span class="help" dir="auto">${esc(meta)}</span>${!m.pending && m.content ? `<button type="button" class="icon-btn sm" data-copy="${i}" title="کپی" aria-label="کپی">${ic('copy', 'sm')}</button>` : ''}${last && !m.pending ? `<button type="button" class="icon-btn sm" data-regen="1" title="جواب دوباره" aria-label="جواب دوباره">${ic('refresh-cw', 'sm')}</button>` : ''}</div></div></div>`;
 }
 function renderTalk() {
   const t = C.talk;
   $('#tkTitle').textContent = t ? t.title : 'چت';
   $('#tkModel').innerHTML = modelOptions(t && t.model ? t.model : defaultModel());
+  $('#tkKb').checked = !!(t && t.kb);
   $('#tkDel').disabled = $('#tkExport').disabled = !t;
   const box = $('#tkStream');
   if (!t || !t.messages.length) {

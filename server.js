@@ -331,9 +331,12 @@ function sellerView() {
     totals: { count: sales.length, year: sales.filter(x => x.issuedAt > year).length, amount: sales.reduce((t, x) => t + (+x.amount || 0), 0) } };
 }
 const { Talks } = require('./lib/talks');
+// knowledge base: the user's own documents (lib/kb.js)
+const kbMod = require('./lib/kb');
+const kb = new kbMod.KB(DATA);
 // Arena: models side by side, and debates between them (lib/arena.js)
 const arena = new (require('./lib/arena').Arena)(DATA, { chat: o => chatLLM(o), onEvent: ev => broadcast(ev) });
-const talks = new Talks(DATA, { chat: chatLLM, onEvent: ev => broadcast(ev), pcAllowed: () => store.settings().pcControl !== false && process.platform === 'win32',
+const talks = new Talks(DATA, { docs: q => kb.search(q, 5), chat: chatLLM, onEvent: ev => broadcast(ev), pcAllowed: () => store.settings().pcControl !== false && process.platform === 'win32',
   // a chat model asked to act on the computer
   act: async a => {
     const r = await voiceAct(a, 'chat');
@@ -364,6 +367,7 @@ function localIso(d = new Date()) { const o = -d.getTimezoneOffset(), p = n => S
 const ASKS_MESSAGES = /پیام|پیامک|اس\s*ام\s*اس|مسیج|اعلان|نوتیف|چه خبر|خبر(ی)? (تازه|جدید)|کد (تایید|تأیید|ورود|پیامکی)|بخون|بخوان|sms|message|notif|what'?s new|anything new|read (it|them|my)/i;
 const ASKS_MAIL = /ایمیل|ای‌میل|ای میل|جیمیل|صندوق|میل(م|ها)|email|e-mail|inbox|gmail|\bmails?\b/i;
 const ASKS_CAL = /تقویم|جلسه|قرار|رویداد|برنامه|مهمانی|تولد|امروز|فردا|پس‌فردا|پس فردا|این هفته|هفته‌ی بعد|چه کار|چیکار|کارهام|calendar|meeting|event|schedule|agenda|appointment|today|tomorrow|this week/i;
+const ASKS_DOCS = /اسناد|سندهام|مدارک|فایل‌هام|فایلهام|فایل‌های من|یادداشت‌هام|قرارداد|فاکتور|صورتحساب|رزومه|گزارش‌های من|طبق (فایل|سند)|my (documents|docs|files|notes)|contract|invoice|according to/i;
 const ASKS_SALES = /خرید|خریدار|لایسنس|فروش|سفارش|مشتری|پرداخت|کارت به کارت|تایید کن|تأیید کن|رد کن|license|purchase|buyer|sale|order|approve|reject/i;
 const agoFa = ms => { const m = Math.round((Date.now() - ms) / 6e4); return m < 2 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' days ago'; };
 const voiceContext = async (said = '') => {
@@ -390,6 +394,7 @@ const voiceContext = async (said = '') => {
     } : {}),
     ...(ASKS_SALES.test(said) && clubAdmin() && club.url() && club.token() ? { purchases: await freshPurchases() } : {}),
     ...(ASKS_MAIL.test(said) ? { mail: await mailForVoice() } : {}),
+    ...(ASKS_DOCS.test(said) && kb.index.length ? { docs: kb.search(said, 4).map(h => ({ name: h.name, part: h.part, text: h.text.slice(0, 700) })) } : {}),
     ...(pcJob.run || pcJob.pending ? { pc: { running: pcJob.run ? pcJob.task : null, steps: pcJob.steps.length, waiting: pcJob.pending ? pcJob.pending.question : null, task: pcJob.pending ? pcJob.pending.task : null } } : {}),
     ...(ASKS_CAL.test(said) && calendars.list.length ? { events: await eventsForVoice() } : {}),
   };
@@ -1223,6 +1228,23 @@ async function api(req, res, url) {
     const f = { who: url.searchParams.get('who') || '', q: url.searchParams.get('q') || '', failed: url.searchParams.get('failed') === '1', month: url.searchParams.get('month') || '' };
     if (!parts[1] && m === 'GET') return send(res, 200, { items: audit.list({ ...f, limit: 400 }), months: audit.months(), perms: auditMod.PERM_OF });
     if (parts[1] === 'export' && m === 'GET') return send(res, 200, { csv: audit.csv(f) });
+  }
+  if (parts[0] === 'kb') {
+    try {
+      if (!parts[1] && m === 'GET') return send(res, 200, kb.view());
+      if (parts[1] === 'folders' && m === 'POST') { const d = kb.addFolder(body.dir); audit.log('panel', 'kb_folder', { dir: d }); kb.reindex(p => broadcast({ type: 'kb', progress: p })).then(v => broadcast({ type: 'kb', done: true, view: v })).catch(e => broadcast({ type: 'kb', error: e.message })); return send(res, 200, kb.view()); }
+      if (parts[1] === 'remove' && m === 'POST') { kb.removeFolder(String(body.dir || '')); return send(res, 200, kb.view()); }
+      if (parts[1] === 'reindex' && m === 'POST') { kb.reindex(p => broadcast({ type: 'kb', progress: p })).then(v => broadcast({ type: 'kb', done: true, view: v })).catch(e => broadcast({ type: 'kb', error: e.message })); return send(res, 200, { started: true }); }
+      if (parts[1] === 'search' && m === 'GET') return send(res, 200, { hits: kb.search(url.searchParams.get('q') || '', 10) });
+      if (parts[1] === 'ask' && m === 'POST') {
+        const q = String(body.q || '').trim().slice(0, 2000); if (!q) throw new Error('سؤال خالی است');
+        const hits = kb.search(q, 6); if (!hits.length) return send(res, 200, { answer: 'در اسناد شما چیزی درباره‌ی این پیدا نشد.', hits });
+        const st = store.settings(), spec = String(body.model || '') || ((await voiceOnline(st)) ? (st.voiceModel || 'claude-haiku-5-5') : offlineSpec(st));
+        if (!spec) throw new Error('مدلی برای جواب دادن در دسترس نیست');
+        const r = await chatLLM({ spec, system: kbMod.ASK_SYS, messages: [{ role: 'user', content: `Passages:\n${kbMod.contextBlock(hits)}\n\nQuestion: ${q}` }], maxTokens: 1500, temperature: 0.2, signal: AbortSignal.timeout(150000) });
+        return send(res, 200, { answer: r.text, hits: hits.map(h => ({ ...h, text: h.text.slice(0, 600) })), model: spec });
+      }
+    } catch (e) { return send(res, 400, { error: e.message }); }
   }
   if (parts[0] === 'arena') {
     try {

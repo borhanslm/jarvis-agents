@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('jarvisDesktop', {
   voice: ev => ipcRenderer.send('jarvis:voice', { state: String(ev && ev.state || ''), label: String(ev && ev.label || '').slice(0, 80), reply: ev && ev.reply ? String(ev.reply).slice(0, 400) : '' }),
   // custom title bar
   minimize: () => ipcRenderer.send('jarvis:win', 'minimize'),
+  pickFolder: title => ipcRenderer.invoke('jarvis:pick-folder', title),
   toggleMaximize: () => ipcRenderer.send('jarvis:win', 'toggle-max'),
   toggleFullscreen: () => ipcRenderer.send('jarvis:win', 'toggle-full'),
   close: () => ipcRenderer.send('jarvis:win', 'close'),

@@ -226,6 +226,11 @@ if (!app.requestSingleInstanceLock()) {
   // and sends it frames; a click on the TV orb comes back to the main window as "talk".
   let stageWin = null;
   const stageState = () => { if (win && !win.isDestroyed()) win.webContents.send('jarvis:stage', { type: 'state', open: !!stageWin }); };
+  // a real folder picker (knowledge base, projects)
+  ipcMain.handle('jarvis:pick-folder', async (e, title) => {
+    const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), { title: String(title || 'انتخاب پوشه').slice(0, 80), properties: ['openDirectory'] });
+    return r.canceled ? null : r.filePaths[0];
+  });
   ipcMain.handle('jarvis:displays', () => {
     const { screen } = require('electron'), prim = screen.getPrimaryDisplay().id;
     return screen.getAllDisplays().map((d, i) => ({ id: d.id, label: d.label || `صفحه‌ی ${i + 1}`, primary: d.id === prim, w: Math.round(d.size.width * d.scaleFactor), h: Math.round(d.size.height * d.scaleFactor) }));
