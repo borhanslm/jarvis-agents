@@ -899,7 +899,7 @@ async function api(req, res, url) {
       // already signed in? one tiny headless request tells
       try { await agy.chat({ messages: [{ role: 'user', content: 'Reply with: ok' }], timeoutMs: 60000 }); return send(res, 200, { ok: true, already: true }); }
       catch (e) { if (!e.needLogin) return send(res, 200, { ok: false, error: e.message }); }
-      const ok = openTerminal(`Write-Host "Sign in with your Google account: choose Google OAuth when asked; the browser opens. When you see the agy prompt, type /exit."; & '${a.cmd.replace(/'/g, "''")}'`);
+      const ok = openTerminal(`Write-Host "1) Choose Google OAuth. 2) Sign in in the browser. 3) Press Copy to Clipboard on the Google page, then RIGHT-CLICK in this window to paste the code and press Enter. 4) When you see the agy prompt, type /exit." -ForegroundColor Cyan; & '${a.cmd.replace(/'/g, "''")}'`);
       return send(res, 200, { ok });
     }
   }
