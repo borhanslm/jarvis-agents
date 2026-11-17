@@ -16,8 +16,7 @@ const STATE = {
   thinking: { label: 'در حال فکر کردن…', sub: '', rgb: [180, 140, 255] },
   speaking: { label: 'در حال صحبت…', sub: 'برای قطع، روی گوی بزنید', rgb: [255, 183, 71] },
 };
-const P = { el: null, raf: 0, rgb: [79, 216, 255], lvl: 0, t0: performance.now(), parts: [], eng: null, vs: null, tab: 'general' };
-const reduce = () => window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+const P = { el: null, raf: 0, orb: null, eng: null, vs: null, tab: 'general' };
 
 function enter(host) {
   P.el = host;
@@ -28,6 +27,8 @@ function enter(host) {
     <div class="jv-top">
       <div class="jv-brand"><span>J.A.R.V.I.S</span><small id="jvNet"></small></div>
       <div class="jv-tools">
+        ${window.jarvisDesktop && window.jarvisDesktop.stage ? `<button type="button" class="jv-tool" id="jvTv" title="نمایش روی تلویزیون یا مانیتور دوم" aria-label="نمایش روی تلویزیون یا مانیتور دوم">${ic('monitor')}</button>` : ''}
+        <button type="button" class="jv-tool" id="jvFull" title="تمام‌صفحه (F11)" aria-label="تمام‌صفحه (F11)">${ic(document.documentElement.classList.contains('is-full') ? 'minimize-2' : 'maximize-2')}</button>
         <button type="button" class="jv-tool" id="jvHist" title="گفتگو" aria-label="گفتگو">${ic('messages-square')}</button>
         <button type="button" class="jv-tool" id="jvGear" title="تنظیمات جارویس" aria-label="تنظیمات جارویس">${ic('settings')}</button>
       </div>
@@ -54,11 +55,13 @@ function enter(host) {
   $('#jvHist', host).onclick = () => { const d = $('#jvDrawer', host); d.hidden = !d.hidden; if (!d.hidden) drawLog(); };
   $('#jvDrawer', host).querySelector('[data-close]').onclick = () => { $('#jvDrawer', host).hidden = true; };
   $('#jvGear', host).onclick = () => openSettings();
+  $('#jvFull', host).onclick = () => window.toggleFullscreen && window.toggleFullscreen();
+  const tv = $('#jvTv', host); if (tv) tv.onclick = () => openStagePicker(tv);
   status(); drawLog();
   window.addEventListener('resize', size); requestAnimationFrame(size);
   cancelAnimationFrame(P.raf); P.raf = requestAnimationFrame(frame);
 }
-function leave() { document.body.classList.remove('on-jarvis'); cancelAnimationFrame(P.raf); P.raf = 0; window.removeEventListener('resize', size); P.el = null; }
+function leave() { document.body.classList.remove('on-jarvis'); cancelAnimationFrame(P.raf); P.raf = 0; P.orb = null; window.removeEventListener('resize', size); P.el = null; }
 
 function status() {
   if (!P.el) return;
@@ -87,57 +90,52 @@ function size() {
   const c = P.el && $('#jvOrb', P.el); if (!c) return;
   // fill the window below where the page starts (the layout above may have bars)
   const jv = P.el.querySelector('.jv'); jv.style.height = Math.max(480, window.innerHeight - jv.getBoundingClientRect().top - 10) + 'px';
-  const r = c.getBoundingClientRect(), d = Math.min(devicePixelRatio || 1, 2);
-  c.width = Math.round(r.width * d); c.height = Math.round(r.height * d);
+  window.JarvisOrb.fit(c);
 }
 function frame(now) {
   if (!P.el) return;
   P.raf = requestAnimationFrame(frame);
   const c = $('#jvOrb', P.el); if (!c || !c.width) return;
-  const g = c.getContext('2d'), w = c.width, h = c.height, cx = w / 2, cy = h * 0.45, R = Math.min(w, h) * 0.17;
-  const v = V(), s = STATE[v.state] || STATE.idle, t = (now - P.t0) / 1000, slow = reduce();
-  for (let i = 0; i < 3; i++) P.rgb[i] += (s.rgb[i] - P.rgb[i]) * 0.06;
-  // while waiting it still breathes with the room sound, so you can see the microphone is alive
-  const mic = Math.min(1, v.level || 0);
-  const target = v.state === 'recording' || v.state === 'speaking' ? Math.min(1, mic * 1.6) : v.state === 'thinking' ? 0.35 + 0.25 * Math.sin(t * 5) : v.state === 'idle' ? 0.1 + 0.05 * Math.sin(t * 1.6) + mic * 0.5 : 0.06;
-  P.lvl += (target - P.lvl) * (target > P.lvl ? 0.35 : 0.08);
-  const L = slow ? 0.15 : P.lvl, col = a => `rgba(${P.rgb.map(Math.round).join(',')},${a})`;
-  g.clearRect(0, 0, w, h);
-  const glow = g.createRadialGradient(cx, cy, R * 0.2, cx, cy, R * (3 + L * 1.5));
-  glow.addColorStop(0, col(0.5)); glow.addColorStop(0.3, col(0.16)); glow.addColorStop(1, col(0));
-  g.fillStyle = glow; g.fillRect(0, 0, w, h);
-  const core = g.createRadialGradient(cx - R * 0.25, cy - R * 0.25, R * 0.05, cx, cy, R * (0.95 + L * 0.25));
-  core.addColorStop(0, 'rgba(255,255,255,0.95)'); core.addColorStop(0.25, col(0.9)); core.addColorStop(1, col(0.08));
-  g.beginPath(); g.arc(cx, cy, R * (0.92 + L * 0.22), 0, Math.PI * 2); g.fillStyle = core; g.fill();
-  g.lineWidth = Math.max(1, w / 700);
-  for (let k = 0; k < 5; k++) {
-    g.beginPath();
-    for (let i = 0; i <= 140; i++) {
-      const a = (i / 140) * Math.PI * 2;
-      const wob = (slow ? 0 : 1) * (Math.sin(a * (3 + k) + t * (1.2 + k * 0.7)) * 0.5 + Math.sin(a * (5 + k * 2) - t * (2 + k)) * 0.5);
-      const r = R * (1.15 + k * 0.17) + wob * R * (0.03 + L * 0.24);
-      const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
-      i ? g.lineTo(x, y) : g.moveTo(x, y);
-    }
-    g.closePath(); g.strokeStyle = col(0.55 - k * 0.09); g.stroke();
-  }
-  g.save(); g.translate(cx, cy);
-  for (const [rr, n, sp] of [[2.2, 90, 0.15], [2.6, 36, -0.08]]) {
-    g.save(); g.rotate(slow ? 0 : t * (v.state === 'thinking' ? sp * 6 : sp));
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2, r1 = R * rr, r2 = r1 + (i % 6 === 0 ? R * 0.14 : R * 0.05);
-      g.beginPath(); g.moveTo(Math.cos(a) * r1, Math.sin(a) * r1); g.lineTo(Math.cos(a) * r2, Math.sin(a) * r2);
-      g.strokeStyle = col(i % 6 === 0 ? 0.45 : 0.18); g.stroke();
-    }
-    g.restore();
-  }
-  g.restore();
-  if (!slow && (v.state === 'speaking' || v.state === 'recording') && P.parts.length < 160 && Math.random() < 0.3 + L) {
-    P.parts.push({ a: Math.random() * Math.PI * 2, r: R * 1.1, v: R * (0.008 + Math.random() * 0.02) * (1 + L * 3), life: 1 });
-  }
-  for (const p of P.parts) { p.r += p.v; p.life -= 0.011; g.beginPath(); g.arc(cx + Math.cos(p.a) * p.r, cy + Math.sin(p.a) * p.r, Math.max(1, w / 900) * (1 + p.life), 0, Math.PI * 2); g.fillStyle = col(p.life * 0.8); g.fill(); }
-  P.parts = P.parts.filter(p => p.life > 0);
+  if (!P.orb || P.orb.canvas !== c) P.orb = window.JarvisOrb.create(c); // the page may be drawn again (e.g. a new skin)
+  const v = V(); P.orb.draw(now, { state: v.state, level: v.level });
 }
+
+// ---------- TV / second monitor ("stage"): a separate full-screen window on another display ----------
+// It only draws: this window keeps listening and sends it the state, sound level and words ~30×/s.
+const D = () => window.jarvisDesktop || {};
+const SG = { open: false, raf: 0, last: 0 };
+async function openStagePicker(btn) {
+  if (SG.open) { D().stage({ action: 'close' }); return; }
+  let list = []; try { list = await D().displays(); } catch {}
+  const others = list.filter(x => !x.primary);
+  if (list.length <= 1) {
+    if (!confirm('فقط یک صفحه‌نمایش پیدا شد. تلویزیون یا مانیتور دوم را وصل کنید (ویندوز: Win+P ← Extend).\n\nفعلاً روی همین صفحه نشان داده شود؟')) return;
+    return D().stage({ action: 'open', displayId: list[0] && list[0].id });
+  }
+  if (others.length === 1) return D().stage({ action: 'open', displayId: others[0].id });
+  const pick = document.createElement('div'); pick.className = 'jv-pick'; pick.setAttribute('role', 'menu');
+  pick.innerHTML = `<b>جارویس روی کدام صفحه؟</b>${list.map((x, i) => `<button type="button" role="menuitem" data-d="${x.id}">${ic('monitor', 'sm')}${esc(x.label || 'صفحه‌ی ' + fa(i + 1))} <small dir="ltr">${x.w}×${x.h}</small>${x.primary ? ' <small>(اصلی)</small>' : ''}</button>`).join('')}`;
+  btn.closest('.jv-top').appendChild(pick);
+  const off = e => { if (!pick.contains(e.target)) { pick.remove(); document.removeEventListener('pointerdown', off); } };
+  setTimeout(() => document.addEventListener('pointerdown', off));
+  pick.onclick = e => { const b = e.target.closest('[data-d]'); if (!b) return; pick.remove(); document.removeEventListener('pointerdown', off); D().stage({ action: 'open', displayId: +b.dataset.d }); };
+}
+function stageTick(now) {
+  SG.raf = requestAnimationFrame(stageTick);
+  if (now - SG.last < 33) return; SG.last = now;
+  const v = V(), s = STATE[v.state] || STATE.idle, log = (v.log || []).filter(l => l.who !== 'error'), last = log[log.length - 1];
+  D().stageFrame({ state: v.state, level: v.level || 0, label: s.label, caption: last ? last.text : '', who: last ? last.who : '' });
+}
+function stagePalette() { if (SG.open && D().stageFrame) D().stageFrame({ palette: window.JarvisOrb.palette(), skin: document.documentElement.dataset.skin || '', theme: document.documentElement.dataset.theme || '' }); }
+if (D().onStage) D().onStage(ev => {
+  if (ev.type === 'state') {
+    SG.open = !!ev.open; cancelAnimationFrame(SG.raf);
+    if (SG.open) { stagePalette(); SG.raf = requestAnimationFrame(stageTick); }
+    const tv = P.el && $('#jvTv', P.el); if (tv) { tv.classList.toggle('on', SG.open); tv.title = SG.open ? 'بستن نمایش روی صفحه‌ی دوم' : 'نمایش روی تلویزیون یا مانیتور دوم'; tv.setAttribute('aria-label', tv.title); }
+  } else if (ev.type === 'talk') { const v = V(); if (v.state === 'speaking') v.stopSpeaking && v.stopSpeaking(); else v.talk && v.talk(); }
+});
+// the skin changed: new orb colours here and on the stage
+new MutationObserver(() => { if (P.orb) P.orb.setPalette(); stagePalette(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-skin', 'data-theme', 'class', 'style'] });
 
 // ---------- settings (one gear button; everything in here) ----------
 const STT_LIST = [['auto', 'خودکار (محلی، وگرنه اولین سرویسِ دارای کلید)'], ['local', 'محلی — whisper.cpp (رایگان، آفلاین)'], ['gemini', 'Google Gemini'], ['openai', 'OpenAI'], ['groq', 'Groq (Whisper، سریع)'], ['elevenlabs', 'ElevenLabs'], ['azure', 'Azure Speech'], ['deepgram', 'Deepgram']];

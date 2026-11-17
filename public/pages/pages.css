@@ -485,3 +485,16 @@ body.on-jarvis .topbar { display: none !important; }
 .sl-adv { margin: 8px 0 20px; }
 .sl-adv > summary { cursor: pointer; display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 4px; border: 1px solid var(--color-border); color: var(--color-fg-muted); list-style: none; }
 .sl-adv[open] > summary { margin-bottom: 12px; color: var(--color-primary); }
+.jv-tool.on { background: color-mix(in srgb, var(--color-primary) 25%, transparent); box-shadow: 0 0 18px color-mix(in srgb, var(--color-primary) 45%, transparent); }
+.jv-pick { position: absolute; top: 64px; inset-inline-end: 16px; z-index: 6; display: grid; gap: 6px; min-width: 240px; padding: 12px; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-surface-1); box-shadow: 0 12px 32px rgb(0 0 0 / .4); }
+.jv-pick b { font-size: 13px; color: var(--color-fg-muted); }
+.jv-pick button { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 10px; border: 1px solid var(--color-border-subtle); border-radius: 8px; background: transparent; color: var(--color-fg); cursor: pointer; text-align: start; }
+.jv-pick button:hover, .jv-pick button:focus-visible { background: var(--color-hover); border-color: var(--color-primary-line); }
+.jv-pick small { color: var(--color-fg-muted); }
+/* full screen on the JARVIS page: nothing but JARVIS (TV / presentation look) */
+html.is-full body.on-jarvis .sidebar, html.is-full body.on-jarvis .rail { display: none !important; }
+html.is-full body.on-jarvis .layout { grid-template-columns: minmax(0, 1fr) !important; padding: 0 !important; gap: 0 !important; }
+html.is-full body.on-jarvis .page-view { grid-column: 1 / -1; }
+html.is-full body.on-jarvis .jv { border-radius: 0; }
+/* the top bar is hidden on the JARVIS page, so the page gets its height back (the bottom bar was cut off) */
+body.on-jarvis .layout { height: 100%; padding-bottom: 0; }

@@ -14,6 +14,8 @@ const path = require('path');
 
 const APP_PORT = 47777; // fixed so the page origin (and its saved preferences) stays the same
 
+// a separate data folder for testing next to an installed JARVIS (developers only)
+if (process.env.JARVIS_USER_DATA) electron.app.setPath('userData', process.env.JARVIS_USER_DATA);
 // ---- logging to %APPDATA%\JARVIS\logs\main.log ----
 const logDir = path.join(app.getPath('userData'), 'logs');
 fs.mkdirSync(logDir, { recursive: true });
@@ -29,7 +31,7 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.setAppUserModelId('app.jarvis.agents');
-  let win = null;
+  let win = null, serverOrigin = "";
   let srv = null;
   let quitting = false;
   let tray = null;
@@ -116,7 +118,7 @@ if (!app.requestSingleInstanceLock()) {
     fs.mkdirSync(process.env.JARVIS_DATA, { recursive: true });
     srv = require('../server.js');
     const { port, token } = await srv.ready;
-    const origin = `http://127.0.0.1:${port}`;
+    const origin = `http://127.0.0.1:${port}`; serverOrigin = origin;
     log('server ready on', origin, 'data', process.env.JARVIS_DATA);
 
     nativeTheme.themeSource = 'dark';
@@ -209,12 +211,50 @@ if (!app.requestSingleInstanceLock()) {
     if (!w) return;
     if (action === 'minimize') w.minimize();
     else if (action === 'toggle-max') (w.isMaximized() ? w.unmaximize() : w.maximize());
+    else if (action === 'toggle-full') w.setFullScreen(!w.isFullScreen());
     else if (action === 'close') w.close();
   });
-  ipcMain.handle('jarvis:win-state', e => { const w = BrowserWindow.fromWebContents(e.sender); return { maximized: !!(w && w.isMaximized()) }; });
+  ipcMain.handle('jarvis:win-state', e => { const w = BrowserWindow.fromWebContents(e.sender); return { maximized: !!(w && w.isMaximized()), fullscreen: !!(w && w.isFullScreen()) }; });
   app.on('browser-window-created', (_e, w) => {
-    const push = () => { if (!w.isDestroyed()) w.webContents.send('jarvis:win-state', { maximized: w.isMaximized() }); };
-    w.on('maximize', push); w.on('unmaximize', push);
+    // on Windows isFullScreen() still has the old value inside these events, so the event says which
+    const push = full => { if (!w.isDestroyed()) w.webContents.send('jarvis:win-state', { maximized: w.isMaximized(), fullscreen: typeof full === 'boolean' ? full : w.isFullScreen() }); };
+    w.on('maximize', () => push()); w.on('unmaximize', () => push()); w.on('enter-full-screen', () => push(true)); w.on('leave-full-screen', () => push(false));
+  });
+
+  // ---- JARVIS on a TV / second monitor ----
+  // A draw-only window, full screen on the chosen display. The main window keeps the microphone
+  // and sends it frames; a click on the TV orb comes back to the main window as "talk".
+  let stageWin = null;
+  const stageState = () => { if (win && !win.isDestroyed()) win.webContents.send('jarvis:stage', { type: 'state', open: !!stageWin }); };
+  ipcMain.handle('jarvis:displays', () => {
+    const { screen } = require('electron'), prim = screen.getPrimaryDisplay().id;
+    return screen.getAllDisplays().map((d, i) => ({ id: d.id, label: d.label || `صفحه‌ی ${i + 1}`, primary: d.id === prim, w: Math.round(d.size.width * d.scaleFactor), h: Math.round(d.size.height * d.scaleFactor) }));
+  });
+  ipcMain.on('jarvis:stage', (e, o) => {
+    if (!win || e.sender !== win.webContents) return;
+    if (o.action === 'close') { if (stageWin) stageWin.close(); return; }
+    const { screen } = require('electron'), all = screen.getAllDisplays();
+    const d = all.find(x => x.id === o.displayId) || all.find(x => x.id !== screen.getPrimaryDisplay().id) || all[0];
+    if (stageWin) { stageWin.setFullScreen(false); stageWin.setBounds(d.bounds); stageWin.setFullScreen(true); stageWin.focus(); return; }
+    stageWin = new BrowserWindow({
+      x: d.bounds.x, y: d.bounds.y, width: d.bounds.width, height: d.bounds.height,
+      frame: false, fullscreen: true, backgroundColor: '#020A12', title: 'JARVIS', show: false, autoHideMenuBar: true,
+      icon: path.join(__dirname, 'icon.ico'),
+      webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false, backgroundThrottling: false },
+    });
+    stageWin.loadURL(`${serverOrigin}/stage.html`);
+    stageWin.once('ready-to-show', () => { stageWin.show(); stageState(); });
+    stageWin.on('closed', () => { stageWin = null; stageState(); });
+    win.once('closed', () => { if (stageWin && !stageWin.isDestroyed()) stageWin.close(); });
+  });
+  ipcMain.on('jarvis:stage-frame', (e, f) => {
+    if (!stageWin || stageWin.isDestroyed() || !win || e.sender !== win.webContents || !f || typeof f !== 'object') return;
+    stageWin.webContents.send('jarvis:stage-frame', f);
+  });
+  ipcMain.on('jarvis:stage-input', (e, a) => {
+    if (!stageWin || e.sender !== stageWin.webContents) return;
+    if (a === 'close') stageWin.close();
+    else if (win && !win.isDestroyed()) win.webContents.send('jarvis:stage', { type: 'talk' });
   });
 
   app.on('second-instance', () => showWin());

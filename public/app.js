@@ -1531,6 +1531,23 @@ document.getElementById('dlgBody').addEventListener('change', e => {
   d.onWindowState(sync);
 })();
 
+// ---------- full screen (the whole app; F11 too) ----------
+(function fullscreen() {
+  const d = window.jarvisDesktop;
+  const sync = on => {
+    document.documentElement.classList.toggle('is-full', on); window.dispatchEvent(new Event('resize'));
+    document.querySelectorAll('#btnFull, #jvFull').forEach(b => { b.innerHTML = ic(on ? 'minimize-2' : 'maximize-2'); b.title = on ? 'خروج از تمام‌صفحه (F11)' : 'تمام‌صفحه (F11)'; b.setAttribute('aria-label', b.title); });
+  };
+  window.toggleFullscreen = () => {
+    if (d && d.toggleFullscreen) return d.toggleFullscreen();
+    if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => {});
+  };
+  if (d && d.onWindowState) { d.onWindowState(s => sync(s.fullscreen)); d.windowState().then(s => sync(!!s.fullscreen)).catch(() => {}); }
+  else document.addEventListener('fullscreenchange', () => sync(!!document.fullscreenElement));
+  $('#btnFull').onclick = window.toggleFullscreen;
+  document.addEventListener('keydown', e => { if (e.key === 'F11') { e.preventDefault(); window.toggleFullscreen(); } });
+})();
+
 // ---------- HUD clock ----------
 (function hudClock() {
   const t = $('#hudTime'), dEl = $('#hudDate');

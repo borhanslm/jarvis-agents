@@ -14,7 +14,15 @@ contextBridge.exposeInMainWorld('jarvisDesktop', {
   // custom title bar
   minimize: () => ipcRenderer.send('jarvis:win', 'minimize'),
   toggleMaximize: () => ipcRenderer.send('jarvis:win', 'toggle-max'),
+  toggleFullscreen: () => ipcRenderer.send('jarvis:win', 'toggle-full'),
   close: () => ipcRenderer.send('jarvis:win', 'close'),
   windowState: () => ipcRenderer.invoke('jarvis:win-state'),
-  onWindowState: cb => ipcRenderer.on('jarvis:win-state', (_e, s) => cb({ maximized: !!(s && s.maximized) })),
+  onWindowState: cb => ipcRenderer.on('jarvis:win-state', (_e, s) => cb({ maximized: !!(s && s.maximized), fullscreen: !!(s && s.fullscreen) })),
+  // JARVIS on a TV / second monitor ("stage"): a draw-only full-screen window on another display
+  displays: () => ipcRenderer.invoke('jarvis:displays'),
+  stage: o => ipcRenderer.send('jarvis:stage', { action: o && o.action === 'close' ? 'close' : 'open', displayId: Number(o && o.displayId) || 0 }),
+  stageFrame: f => ipcRenderer.send('jarvis:stage-frame', f),
+  onStage: cb => ipcRenderer.on('jarvis:stage', (_e, ev) => cb(ev || {})),
+  onStageFrame: cb => ipcRenderer.on('jarvis:stage-frame', (_e, f) => cb(f || {})),
+  stageInput: a => ipcRenderer.send('jarvis:stage-input', a === 'close' ? 'close' : 'talk'),
 });
