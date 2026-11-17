@@ -159,3 +159,14 @@ button.bell-item:hover, button.bell-item:focus-visible { background: var(--color
 .ar-hist { list-style: none; padding: 0; display: grid; gap: 6px; }
 .ar-h { width: 100%; display: grid; gap: 2px; padding: 8px 12px; border: 1px solid var(--color-border-subtle); border-radius: 8px; background: var(--color-surface-1); color: var(--color-fg); text-align: start; font: inherit; cursor: pointer; }
 .ar-status { margin-top: 10px; }
+
+/* permissions & audit */
+.au-perms { display: grid; gap: 4px; }
+.au-perm { display: flex; align-items: center; gap: 12px; padding: 10px 6px; border-bottom: 1px solid var(--color-border-subtle); cursor: pointer; }
+.au-pt { flex: 1; display: grid; gap: 2px; }
+.au-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+.au-filters .sms-search { flex: 1; min-width: 220px; border: 1px solid var(--color-border-subtle); border-radius: 8px; }
+.au-table td { vertical-align: top; font-size: 13px; }
+.au-t { white-space: nowrap; }
+.au-d { max-width: 520px; overflow-wrap: anywhere; color: var(--color-fg-muted); }
+.au-table .bad-row td { background: color-mix(in srgb, var(--color-danger, #e33) 7%, transparent); }

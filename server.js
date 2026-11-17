@@ -317,7 +317,7 @@ const arena = new (require('./lib/arena').Arena)(DATA, { chat: o => chatLLM(o), 
 const talks = new Talks(DATA, { chat: chatLLM, onEvent: ev => broadcast(ev), pcAllowed: () => store.settings().pcControl !== false && process.platform === 'win32',
   // a chat model asked to act on the computer
   act: async a => {
-    const r = await voiceAct(a);
+    const r = await voiceAct(a, 'chat');
     if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'انجام نشد' };
     const fa = { open_app: () => 'باز شد: ' + ((r.pc && r.pc.opened) || a.params.name || ''), open_url: () => 'در مرورگر باز شد', web_search: () => 'جستجو در مرورگر باز شد', open_folder: () => 'پوشه باز شد', volume: () => 'صدا تنظیم شد', media: () => 'انجام شد', screenshot: () => 'اسکرین‌شات ذخیره شد: ' + ((r.pc && r.pc.file) || ''), pc_do: () => 'جارویس روی کامپیوتر شروع به کار کرد؛ نتیجه را اعلام می‌کند (برای توقف، موس را تکان بدهید).' }[a.type];
     return { ok: true, text: fa ? fa() : 'انجام شد' };
@@ -502,6 +502,7 @@ setTimeout(() => checkPurchases().catch(() => {}), 20000).unref();
 // approve (license -> buyer's club account -> their app activates itself) or reject one purchase request;
 // used by the button on the sales page and by the voice assistant (after a yes)
 async function decidePurchase(id, approve, reason) {
+  audit.log('panel', approve ? 'approve_purchase' : 'reject_purchase', { id, reason });
   const s = store.settings();
   const list = (await club.call('GET', '/api/admin/purchases?status=pending')).purchases;
   const p = list.find(x => x.id === String(id)); if (!p) throw new Error('این درخواست دیگر در انتظار نیست');
@@ -541,8 +542,8 @@ async function brainAsk(b, text) {
 const bot = new Bot({
   config: () => { const s = store.settings(); return { enabled: !!s.botEnabled, channel: s.notifyPhone, token: setup.secrets.get('notifyToken'), chatId: s.notifyChatId, voiceReply: s.botVoiceReply || 'auto' }; },
   call: (...x) => notify.call(...x), fileUrl: (...x) => notify.fileUrl(...x), media, // notify is defined further down
-  ask: async text => { const r = await brainAsk(botBrain, text); const result = r.confirm ? null : await voiceAct(r.action); return { ...r, result }; },
-  confirm: async yes => { const a = botBrain.confirm(yes); return { action: a, result: a ? await voiceAct(a) : null }; },
+  ask: async text => { const r = await brainAsk(botBrain, text); const result = r.confirm ? null : await voiceAct(r.action, 'telegram'); return { ...r, result }; },
+  confirm: async yes => { const a = botBrain.confirm(yes); return { action: a, result: a ? await voiceAct(a, 'telegram') : null }; },
   reset: () => botBrain.reset(),
   taskAction,
   onCallback: async data => { const m = /^wf:([\w-]+):(yes|no)$/.exec(data); if (!m) return null; try { workflows.answer(m[1], m[2] === 'yes'); return m[2] === 'yes' ? '✅ تأیید شد؛ ورک‌فلو ادامه می‌دهد.' : '❌ رد شد.'; } catch (e) { return '⚠️ ' + e.message; } },
@@ -606,7 +607,7 @@ async function pcStart(task, { history = [], approved = [] } = {}) {
   require('./lib/pc-agent').runTask(task, {
     llm: o => chatLLM({ spec, ...o }), signal: ctrl.signal, history, approved,
     openApp: name => pc.run('open_app', { name }), openUrl: url => pc.run('open_url', { url }),
-    onStep: ev => { pcJob.steps.push(ev); broadcast({ type: 'pcAgent', state: 'step', n: ev.n, thought: ev.thought, action: ev.action }); },
+    onStep: ev => { pcJob.steps.push(ev); audit.log('agent', 'pc_' + (ev.action && ev.action.type), { ...(ev.action || {}), window: ev.title }); broadcast({ type: 'pcAgent', state: 'step', n: ev.n, thought: ev.thought, action: ev.action }); },
   }).then(r => {
     if (pcJob.run !== ctrl) return; pcJob.run = null;
     if (r.status === 'ask') pcJob.pending = { task, history: r.history, question: r.question, approved };
@@ -616,7 +617,17 @@ async function pcStart(task, { history = [], approved = [] } = {}) {
   }).catch(e => { if (pcJob.run === ctrl) pcJob.run = null; broadcast({ type: 'pcAgent', state: 'fail', say: 'کنترل کامپیوتر خطا داد: ' + e.message.slice(0, 160), task }); });
   return { started: true, model: spec };
 }
-async function voiceAct(a) {
+// every action goes through here: the permission switches («مجوزها») and the audit log
+const auditMod = require('./lib/audit');
+const audit = new auditMod.Audit(DATA);
+async function voiceAct(a, via = 'voice') {
+  if (!a) return null;
+  if (!auditMod.allowed(store.settings(), a.type)) { audit.log(via, a.type, a.params, { ok: false, error: 'blocked by permissions' }); return { ok: false, error: 'این کار در «مجوزها و گزارش» خاموش است' }; }
+  let r; try { r = await voiceActRaw(a); } catch (e) { r = { ok: false, error: e.message }; }
+  if (!['mark_read'].includes(a.type)) audit.log(via, a.type, a.type === 'send_email' ? { to: a.params && a.params.to, subject: a.params && a.params.subject } : a.params, { ok: !r || r.ok !== false, error: r && r.error });
+  return r;
+}
+async function voiceActRaw(a) {
   if (!a) return null;
   const p = a.params || {};
   if (a.type === 'run_team') {
@@ -970,7 +981,10 @@ async function api(req, res, url) {
   if (parts[0] === 'settings' && m === 'POST') {
     if (!validMcp(body.mcpConfig)) return send(res, 400, { error: 'پیکربندی MCP باید JSON معتبر با کلید mcpServers باشد' });
     const wasOff = !store.settings().requireToken;
+    const before = JSON.parse(JSON.stringify(store.settings())); // a copy: updateSettings changes the same object
     const out = store.updateSettings(body);
+    const changedKeys = Object.keys(body || {}).filter(k => JSON.stringify(before[k]) !== JSON.stringify(out[k]));
+    if (changedKeys.length) audit.log('panel', 'settings', changedKeys.map(k => /^perm|^pcControl$/.test(k) ? `${k}=${out[k]}` : k).join(', '));
     broadcast({ type: 'settings', settings: out });
     // The panel that turns the token on gets it, so it can keep talking to the server.
     return send(res, 200, wasOff && out.requireToken ? { ...out, token: TOKEN } : out);
@@ -1082,7 +1096,7 @@ async function api(req, res, url) {
       }
       // upload: SKILL.md or .zip -> preview first, install only after "yes"
       if (parts[1] === 'upload' && !parts[2] && m === 'POST') return send(res, 200, await require('./lib/skill-tools').stageUpload(body));
-      if (parts[1] === 'upload' && parts[2] === 'confirm' && m === 'POST') { const s = require('./lib/skill-tools').confirmUpload(skills, body.token); changed(); return send(res, 200, s); }
+      if (parts[1] === 'upload' && parts[2] === 'confirm' && m === 'POST') { const s = require('./lib/skill-tools').confirmUpload(skills, body.token); audit.log('panel', 'skill_install', { name: s.name, from: s.origin || s.source }); changed(); return send(res, 200, s); }
       if (parts[1] === 'upload' && parts[2] === 'cancel' && m === 'POST') { require('./lib/skill-tools').cancelUpload(body.token); return send(res, 200, { ok: true }); }
       // learn from a video: frames + narration -> a skill draft (saved only when the user saves)
       if (parts[1] === 'from-video' && m === 'POST') {
@@ -1153,7 +1167,7 @@ async function api(req, res, url) {
         // hand a work task to the coding team (same path as the voice action)
         const t = tasks.get(parts[1]); const proj = store.project(String(body.projectId || ''));
         if (!t || !proj) return send(res, 400, { error: !t ? 'تسک پیدا نشد' : 'پروژه را انتخاب کنید' });
-        const r = await voiceAct({ type: 'run_team', params: { project: proj.name, task: t.title + (t.notes ? '\n\n' + t.notes : ''), mode: body.mode } });
+        const r = await voiceAct({ type: 'run_team', params: { project: proj.name, task: t.title + (t.notes ? '\n\n' + t.notes : ''), mode: body.mode } }, 'panel');
         if (r && r.ok) tasks.update(t.id, { projectId: proj.id, notes: t.notes });
         if (r && r.ok) { const tt = tasks.get(t.id); tt.chatId = r.chatId; tasks._save(); }
         return send(res, r && r.ok ? 200 : 400, r && r.ok ? r : { error: (r && r.error) || 'شروع نشد' });
@@ -1178,6 +1192,11 @@ async function api(req, res, url) {
       }
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
+  if (parts[0] === 'audit') {
+    const f = { who: url.searchParams.get('who') || '', q: url.searchParams.get('q') || '', failed: url.searchParams.get('failed') === '1', month: url.searchParams.get('month') || '' };
+    if (!parts[1] && m === 'GET') return send(res, 200, { items: audit.list({ ...f, limit: 400 }), months: audit.months(), perms: auditMod.PERM_OF });
+    if (parts[1] === 'export' && m === 'GET') return send(res, 200, { csv: audit.csv(f) });
+  }
   if (parts[0] === 'arena') {
     try {
       if (!parts[1] && m === 'GET') return send(res, 200, arena.view());
@@ -1192,7 +1211,7 @@ async function api(req, res, url) {
       if (parts[1] === 'status' && m === 'GET') return send(res, 200, { running: pcJob.run ? pcJob.task : null, pending: pcJob.pending && pcJob.pending.question, steps: pcJob.steps.slice(-30) });
       if (parts[1] === 'do' && m === 'POST') return send(res, 200, await pcStart(String(body.task || '').slice(0, 2000)));
       if (parts[1] === 'stop' && m === 'POST') { pcStop(); pcJob.pending = null; broadcast({ type: 'pcAgent', state: 'stopped', say: 'متوقف شد.' }); return send(res, 200, { ok: true }); }
-      if (parts[1] === 'continue' && m === 'POST') return send(res, 200, await voiceAct({ type: 'pc_continue', params: { approve: !!body.approve } }));
+      if (parts[1] === 'continue' && m === 'POST') return send(res, 200, await voiceAct({ type: 'pc_continue', params: { approve: !!body.approve } }, 'panel'));
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
   if (parts[0] === 'mail') {
@@ -1228,6 +1247,7 @@ ${prefs ? 'What you know about the user:\n' + prefs + '\n' : ''}Answer with ONLY
       if (parts[1] === 'send' && m === 'POST') {
         if (body.confirmed !== true) throw new Error('ارسال باید تأیید شود');
         const r = await mail.send(acc, body);
+        audit.log('panel', 'send_email', { to: r.to.join(', '), subject: r.subject });
         notices.add({ kind: 'mail', title: 'ایمیل فرستاده شد به ' + r.to.join('، '), body: r.subject, section: 'mail' });
         return send(res, 200, r);
       }
@@ -1555,8 +1575,8 @@ ${prefs ? 'What you know about the user:\n' + prefs + '\n' : ''}Answer with ONLY
         }
         r.brain = { spec, offline: spec === off };
         let result;
-        if (r.action && /^phone_/.test(r.action.type) && !body.phone) result = sendToPhone(r.action, text);
-        else result = r.confirm ? null : await voiceAct(r.action);
+        if (r.action && /^phone_/.test(r.action.type) && !body.phone) result = auditMod.allowed(s, r.action.type) ? (audit.log('voice', r.action.type, r.action.params), sendToPhone(r.action, text)) : { ok: false, error: 'این کار در «مجوزها و گزارش» خاموش است' };
+        else result = r.confirm ? null : await voiceAct(r.action, body.phone ? 'phone' : 'voice');
         // a question that needs a yes: show it on the phone too, so it can be answered there
         if (r.confirm && !body.phone) broadcast({ type: 'confirmRequest', say: r.say, action: r.action, at: Date.now() });
         voiceLog.push({ ts: Date.now(), user: text, say: r.say, action: r.action, confirm: r.confirm, result });
@@ -1573,7 +1593,7 @@ ${prefs ? 'What you know about the user:\n' + prefs + '\n' : ''}Answer with ONLY
       }
       if (parts[1] === 'confirm' && m === 'POST') {
         const a = brain.confirm(!!body.yes);
-        const result = a ? await voiceAct(a) : null;
+        const result = a ? await voiceAct(a, body.phone ? 'phone' : 'voice') : null;
         voiceLog.push({ ts: Date.now(), user: body.yes ? '(تأیید)' : '(لغو)', say: '', action: a, result });
         broadcast({ type: 'confirmDone', yes: !!body.yes, action: a, result, from: body.phone ? 'phone' : 'computer' }); // close the question everywhere
         return send(res, 200, { action: a, result });
@@ -1611,10 +1631,10 @@ ${prefs ? 'What you know about the user:\n' + prefs + '\n' : ''}Answer with ONLY
   if (parts[0] === 'connectors') {
     try {
       if (!parts[1] && m === 'GET') return send(res, 200, connectors.view());
-      if (!parts[1] && m === 'POST') { const c = connectors.save(body || {}); extChanged(); return send(res, 200, c); }
+      if (!parts[1] && m === 'POST') { const c = connectors.save(body || {}); audit.log('panel', 'connector_save', { name: c.name, command: c.type === 'http' ? c.url : [c.command, ...(c.args || [])].join(' ') }); extChanged(); return send(res, 200, c); }
       if (parts[1] && parts[2] === 'test' && m === 'POST') return send(res, 200, await connectors.test(parts[1]));
-      if (parts[1] && parts[2] === 'toggle' && m === 'POST') { connectors.setEnabled(parts[1], !!body.enabled); extChanged(); return send(res, 200, { ok: true }); }
-      if (parts[1] && !parts[2] && m === 'DELETE') { connectors.remove(parts[1]); extChanged(); return send(res, 200, { ok: true }); }
+      if (parts[1] && parts[2] === 'toggle' && m === 'POST') { connectors.setEnabled(parts[1], !!body.enabled); audit.log('panel', body.enabled ? 'connector_on' : 'connector_off', { id: parts[1] }); extChanged(); return send(res, 200, { ok: true }); }
+      if (parts[1] && !parts[2] && m === 'DELETE') { connectors.remove(parts[1]); audit.log('panel', 'connector_delete', { id: parts[1] }); extChanged(); return send(res, 200, { ok: true }); }
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
   if (parts[0] === 'plugins') {
@@ -1623,7 +1643,7 @@ ${prefs ? 'What you know about the user:\n' + prefs + '\n' : ''}Answer with ONLY
       if (parts[1] === 'discover' && m === 'GET') return send(res, 200, plugins.discover());
       if (parts[1] === 'install' && m === 'POST') {
         const r = body.dir ? plugins.installDir(String(body.dir)) : await plugins.installGit(String(body.url || ''), body.pick ? String(body.pick) : null);
-        if (!r.marketplace) extChanged();
+        if (!r.marketplace) { extChanged(); audit.log('panel', 'plugin_install', { name: r.name, from: body.dir ? 'folder' : body.url }); }
         return send(res, 200, r);
       }
       if (parts[1] && parts[2] === 'toggle' && m === 'POST') { plugins.setEnabled(parts[1], !!body.enabled); extChanged(); return send(res, 200, { ok: true }); }
