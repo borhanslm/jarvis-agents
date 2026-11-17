@@ -134,3 +134,11 @@ button.bell-item:hover, button.bell-item:focus-visible { background: var(--color
 @media (max-width: 1250px) { .mail-grid { grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); } .mail-cal { grid-column: 1 / -1; max-height: 280px; } }
 @media (max-width: 760px) { .mail-grid { grid-template-columns: 1fr; } }
 @media (min-width: 1900px) { .mail-grid { grid-template-columns: minmax(320px, 440px) minmax(0, 1fr) minmax(280px, 380px); } }
+
+/* learning from a video */
+.sk-vid { display: grid; gap: 10px; }
+.sk-vid-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.sk-vid-st { display: flex; align-items: center; gap: 10px; }
+.sk-vid-st progress { flex: 1; max-width: 420px; }
+.sk-vid-frames { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.sk-vid-frames img { height: 84px; border-radius: 6px; border: 1px solid var(--color-border-subtle); flex: none; }

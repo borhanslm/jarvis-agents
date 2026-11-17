@@ -360,7 +360,7 @@ const voiceContext = async (said = '') => {
     upcoming: (() => { const end = new Date(); end.setHours(23, 59, 59, 999); const from = end.getTime(), to = from + 7 * 864e5; return tasks.all().filter(t => !t.done && t.due && t.due > from && t.due <= to).sort((a, b) => a.due - b.due).slice(0, 25); })(),
     admin: clubAdmin() && !!(club.url() && club.token()),
     memories: memory.recall(said).map(m => ({ kind: m.kind, text: m.text })),
-    routines: skills.all().filter(k => k.source === 'voice').slice(-12).map(k => { const g = skills.get(k.id) || {}; const b = String(g.body || ''); return { name: k.name, when: (/## When\s*\n+([^\n]+)/.exec(b) || [])[1] || k.description, steps: b.replace(/^[\s\S]*?## Steps\s*\n/, '').replace(/\n+/g, ' ').slice(0, 500) }; }),
+    routines: skills.all().filter(k => k.source === 'voice' || k.source === 'video').slice(-16).map(k => { const g = skills.get(k.id) || {}; const b = String(g.body || ''); const where = /\(phone_do\)/.test(b) ? 'phone' : /\(pc_do\)/.test(b) ? 'computer' : ''; return { name: k.name, where, when: (/## When\s*\n+([^\n]+)/.exec(b) || [])[1] || k.description, steps: (where ? b.replace(/^[\s\S]*?## Where/, '## Where') : b.replace(/^[\s\S]*?## Steps\s*\n/, '')).replace(/\n+/g, ' ').slice(0, where ? 1500 : 500) }; }),
     ...(ASKS_MESSAGES.test(said) ? {
       notices: notices.list.filter(n => !n.read).slice(-12).reverse().map(n => ({ kind: n.kind, title: n.title.replace(/[⁨⁩]/g, ''), body: n.body, ago: agoFa(n.at) })),
       phoneLinked: phonePaired(),
@@ -1081,7 +1081,17 @@ async function api(req, res, url) {
       if (parts[1] === 'upload' && !parts[2] && m === 'POST') return send(res, 200, await require('./lib/skill-tools').stageUpload(body));
       if (parts[1] === 'upload' && parts[2] === 'confirm' && m === 'POST') { const s = require('./lib/skill-tools').confirmUpload(skills, body.token); changed(); return send(res, 200, s); }
       if (parts[1] === 'upload' && parts[2] === 'cancel' && m === 'POST') { require('./lib/skill-tools').cancelUpload(body.token); return send(res, 200, { ok: true }); }
-      if (!parts[1] && m === 'POST') { const s = skills.save(body); changed(); return send(res, 200, s); }
+      // learn from a video: frames + narration -> a skill draft (saved only when the user saves)
+      if (parts[1] === 'from-video' && m === 'POST') {
+        const vs = require('./lib/video-skill'), st = store.settings();
+        const frames = (Array.isArray(body.frames) ? body.frames : []).filter(f => f && typeof f.data === 'string' && f.data.length < 600000).slice(0, 24);
+        if (!frames.length) throw new Error('فریمی از ویدیو نیامد');
+        const spec = st.pcAgentModel || ((await voiceOnline(st)) ? (st.voiceModel || 'claude-haiku-5-5') : offlineSpec(st));
+        if (!spec) throw new Error('مدلی برای دیدن ویدیو در دسترس نیست');
+        const r = await chatLLM({ spec, system: vs.SYSTEM, messages: [{ role: 'user', content: vs.content({ frames, transcript: String(body.transcript || ''), note: String(body.note || ''), target: body.target }) }], maxTokens: 3000, temperature: 0.2, json: true, signal: AbortSignal.timeout(400000) });
+        return send(res, 200, { ...vs.toSkill(r.text, body.target), model: spec });
+      }
+      if (!parts[1] && m === 'POST') { const s = skills.save(body); if (['video', 'voice'].includes(body.source) && s && s.source === 'custom') { s.source = body.source; skills._save(); } changed(); return send(res, 200, s); }
       if (parts[1] && m === 'GET') { const s = skills.get(parts[1]); return s ? send(res, 200, s) : send(res, 404, { error: 'اسکیل پیدا نشد' }); }
       if (parts[1] && m === 'DELETE') {
         skills.remove(parts[1]);

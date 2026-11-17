@@ -108,6 +108,7 @@ function skillsHtml() {
   return `<p class="help">${ic('info', 'sm')} اسکیل یعنی «روش انجام یک کار» که ایجنت‌ها و جارویس دنبالش می‌کنند. پلاگین‌ها هم اسکیل می‌آورند؛ به جارویس هم می‌شود با صدا گفت «یادت بگیر وقتی گفتم … این کارها را بکن».</p>
     <div class="row-gap"><button type="button" class="btn primary small" data-skopen="ai">${ic('sparkles', 'sm')}ساخت با هوش مصنوعی</button>
       <button type="button" class="btn small" data-skopen="upload">${ic('upload', 'sm')}آپلود (SKILL.md یا zip)</button>
+      <button type="button" class="btn small" data-skopen="video">${ic('play', 'sm')}یادگیری با ویدیو</button>
       <button type="button" class="btn small ghost" data-skopen="new">${ic('plus', 'sm')}نوشتن دستی</button>
       <button type="button" class="btn small ghost" data-skopen="">${ic('external-link', 'sm')}صفحه‌ی کامل اسکیل‌ها</button></div>
     <h4>کتابخانه${list ? ` (${fa(list.length)})` : ''}</h4><div class="ext-list">${rows}</div>`;
