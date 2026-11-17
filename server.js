@@ -355,7 +355,11 @@ async function freshPurchases() {
   if (Date.now() - pendingPurchases.at > 60000) { try { const r = await club.call('GET', '/api/admin/purchases?status=pending'); pendingPurchases = { list: (r && r.purchases) || [], at: Date.now() }; } catch {} }
   return pendingPurchases.list.slice(0, 15).map(p => ({ id: p.id, name: p.userName, email: p.userEmail, amount: p.amount, ref: p.ref, card4: p.card4, ago: agoFa(p.created) }));
 }
-const brain = new Brain({ chat: chatLLM, context: voiceContext });
+// what JARVIS learned about how it mishears the user (shared by voice and the Telegram assistant)
+const { Lexicon } = require('./lib/voice/lexicon');
+const lexicon = new Lexicon(DATA);
+const sttHint = () => lexicon.hint(store.projects().map(p => p.name));
+const brain = new Brain({ chat: chatLLM, context: voiceContext, lexicon });
 // phone actions asked on the computer: queued for the paired Android app (it picks them up live, or when it opens)
 const phoneTasks = [];
 function sendToPhone(action, text) {
@@ -426,7 +430,7 @@ async function decidePurchase(id, approve, reason) {
 const { Media } = require('./lib/media');
 const media = new Media(voiceAssets);
 const { Bot } = require('./lib/bot');
-const botBrain = new Brain({ chat: chatLLM, context: async said => ({ ...(await voiceContext(said)), channel: 'telegram' }) });
+const botBrain = new Brain({ chat: chatLLM, context: async said => ({ ...(await voiceContext(said)), channel: 'telegram' }), lexicon });
 const botLog = [];
 // the brain's model: online when possible, the offline model when the internet is down (like voice)
 async function brainAsk(b, text) {
@@ -1241,9 +1245,17 @@ async function api(req, res, url) {
         if (wav.length < 1000) return send(res, 400, { error: 'صدایی ضبط نشد' });
         // the panel's Persian wake-word check may only ever use the local engine
         const offline = body.engine === 'local' || !(await voiceOnline(s));
-        return send(res, 200, await speech.transcribe(wav, { engine: body.engine === 'local' ? 'local' : s.voiceStt, offline, lang: ['fa', 'en'].includes(body.lang) ? body.lang : s.voiceLang }));
+        // the wake-word check stays plain; real requests get the learned words as a hint, then the learned fixes
+        const plain = body.engine === 'local';
+        const out = await speech.transcribe(wav, { engine: plain ? 'local' : s.voiceStt, offline, lang: ['fa', 'en'].includes(body.lang) ? body.lang : s.voiceLang, hint: plain ? '' : sttHint() });
+        if (!plain && out.text) { const f = lexicon.apply(out.text); if (f.fixed.length) Object.assign(out, { heard: out.text, text: f.text, fixed: f.fixed }); }
+        return send(res, 200, out);
       }
       if (parts[1] === 'engines' && m === 'GET') return send(res, 200, voiceEngines());
+      // words JARVIS learned from its hearing mistakes (see and forget them in the JARVIS settings)
+      if (parts[1] === 'lexicon' && m === 'GET') return send(res, 200, { corrections: lexicon.all() });
+      if (parts[1] === 'lexicon' && parts[2] === 'remove' && m === 'POST') { lexicon.remove(String(body.heard || '')); return send(res, 200, { corrections: lexicon.all() }); }
+      if (parts[1] === 'lexicon' && parts[2] === 'add' && m === 'POST') { if (!lexicon.learn(body.heard, body.meant)) throw new Error('هر دو کلمه لازم است و باید فرق داشته باشند'); return send(res, 200, { corrections: lexicon.all() }); }
       // save or clear a voice service key (never sent back)
       if (parts[1] === 'keys' && m === 'POST') {
         const id = String(body.service || '');

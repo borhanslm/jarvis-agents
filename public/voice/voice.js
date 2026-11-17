@@ -189,6 +189,7 @@ async function ask(text) {
 }
 function handleReply(r) {
   if (r.brain) setNet(!r.brain.offline, r.brain.offline);
+  if (r.learned && window.toast) window.toast(`یاد گرفتم: «${r.learned.heard}» یعنی «${r.learned.meant}»`);
   if (r.say) addLog('jarvis', r.say);
   if (r.say && window.jarvisDesktop && window.jarvisDesktop.voice) window.jarvisDesktop.voice({ state: 'speaking', label: 'در حال صحبت', reply: r.say });
   if (r.result) doResult(r.result);

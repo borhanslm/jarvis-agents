@@ -81,3 +81,5 @@ button.bell-item:hover, button.bell-item:focus-visible { background: var(--color
   .sms-back { display: inline-grid; }
   .sms-compose .btn span { display: none; }
 }
+.jvs-lex-add { margin-top: 8px; flex-wrap: wrap; }
+.jvs-lex-add input { flex: 1 1 140px; min-width: 0; }

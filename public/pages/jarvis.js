@@ -196,11 +196,19 @@ async function tabGeneral(el) {
       <label class="check"><input type="checkbox" id="gSpeak" ${s.voiceSpeak !== false ? 'checked' : ''}> جواب‌ها را بلند بخواند</label>
       <label class="check"><input type="checkbox" id="gAnnounce" ${s.voiceAnnounce !== false ? 'checked' : ''}> خبرهای تازه را بلند بگوید (پیامک، درخواست خرید، پایان کار ایجنت‌ها)</label>
       <div class="field"><label for="gLang">زبان گفتار</label><select id="gLang">${opts([['auto', 'خودکار فارسی/انگلیسی'], ['fa', 'فقط فارسی (سریع‌تر)'], ['en', 'فقط انگلیسی (سریع‌تر)']], s.voiceLang || 'auto')}</select></div></section>
+    <section class="jvs-sec"><h3>${ic('graduation-cap', 'sm')}کلمه‌هایی که یاد گرفته</h3>
+      <p class="help">وقتی جارویس کلمه‌ای را اشتباه بشنود، می‌پرسد «منظورتان X بود؟». با جواب شما یاد می‌گیرد و دفعه‌ی بعد درست می‌فهمد. این‌جا می‌توانید ببینید، پاک کنید یا خودتان اضافه کنید.</p>
+      <div class="jvs-list" id="gLex"><p class="help">در حال خواندن…</p></div>
+      <div class="row-gap jvs-lex-add"><input id="gLexH" dir="auto" placeholder="اشتباه می‌شنود (مثلاً کرم)" aria-label="کلمه‌ای که اشتباه شنیده می‌شود"><input id="gLexM" dir="auto" placeholder="درستش (مثلاً کروم)" aria-label="کلمه‌ی درست"><button type="button" class="btn btn-sm" id="gLexAdd">${ic('plus', 'sm')}افزودن</button></div></section>
     <section class="jvs-sec"><h3>${ic('brain', 'sm')}مغز جارویس</h3>
       <div class="field"><label for="gMode">آنلاین یا آفلاین</label><select id="gMode">${opts([['auto', 'خودکار — با اینترنت آنلاین، بدون اینترنت آفلاین (پیشنهادی)'], ['online', 'همیشه آنلاین'], ['offline', 'همیشه آفلاین — هیچ چیز از این کامپیوتر بیرون نمی‌رود']], s.voiceMode || 'auto')}</select></div>
       <div class="jvs-2"><div class="field"><label for="gModel">مغز آنلاین</label><select id="gModel" dir="ltr">${opts(models, s.voiceModel)}</select></div>
       <div class="field"><label for="gOff">مغز آفلاین (Ollama)</label><select id="gOff" dir="ltr">${opts([['', ol.models.length ? '— انتخاب کنید —' : '— از تب «اجزای آفلاین» دانلود کنید —'], ...ol.models.map(x => [x.name, x.name])], s.voiceModelOffline || '')}</select></div></div></section>
     <div class="jvs-actions"><button type="button" class="btn btn-primary" id="gSave">${ic('save', 'sm')}ذخیره</button></div>`;
+  const lex = list => { const box = $('#gLex', el); if (!box) return; box.innerHTML = list.length ? list.map(c => `<div class="jvs-row"><span dir="auto">«${esc(c.heard)}» ← <b>${esc(c.meant)}</b></span><span class="help">${fa(c.count || 1)} بار</span><button type="button" class="btn btn-sm ghost" data-lexdel="${esc(c.heard)}" aria-label="فراموش کردن ${esc(c.heard)}">${ic('trash-2', 'sm')}</button></div>`).join('') : '<p class="help">هنوز چیزی یاد نگرفته.</p>'; };
+  api('/voice/lexicon').then(r => lex(r.corrections)).catch(() => lex([]));
+  $('#gLex', el).onclick = async e => { const b = e.target.closest('[data-lexdel]'); if (!b) return; try { lex((await api('/voice/lexicon/remove', { body: { heard: b.dataset.lexdel } })).corrections); } catch (x) { window.toast(x.message, true); } };
+  $('#gLexAdd', el).onclick = async () => { try { lex((await api('/voice/lexicon/add', { body: { heard: $('#gLexH', el).value, meant: $('#gLexM', el).value } })).corrections); $('#gLexH', el).value = ''; $('#gLexM', el).value = ''; } catch (x) { window.toast(x.message, true); } };
   $('#gMic', el).onchange = () => startMeter($('#gMic', el).value, $('#gBar', el));
   startMeter(micOk ? s.voiceMicId : '', $('#gBar', el));
   $('#gSave', el).onclick = async () => {
