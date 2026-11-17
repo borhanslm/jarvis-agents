@@ -104,8 +104,8 @@ test('bot: commands', async () => {
     bot.start(); await until(() => bot.state.connected);
     f.push({ update_id: 80, message: { chat: { id: +OWNER, type: 'private' }, text: '/tasks' } });
     f.push({ update_id: 81, message: { chat: { id: +OWNER, type: 'private' }, text: '/stop' } });
-    assert.ok(await until(() => f.sent.filter(s => s.method === 'sendMessage').length >= 2));
-    const texts = f.sent.map(s => s.body.text).join('|');
-    assert.match(texts, /📋 تسک‌ها/); assert.match(texts, /۲|2 کار متوقف شد/);
+    // wait for both answers (a late reply from the previous test may also arrive here)
+    const texts = () => f.sent.map(s => s.body.text).join('|');
+    assert.ok(await until(() => /📋 تسک‌ها/.test(texts()) && /۲|2 کار متوقف شد/.test(texts())), texts());
   } finally { bot.stop(); f.srv.close(); delete process.env.JARVIS_NOTIFY_BASE; }
 });
