@@ -373,6 +373,7 @@ async function loadState() {
   renderProjects(); renderAgents(); renderSubagents(); renderChats(); renderProjectInfo(); renderQuick();
   const last = localStorage.getItem('jarvis.chat');
   if (last && S.chats.some(c => c.id === last && c.projectId === S.projectId)) openChat(last);
+  window.dispatchEvent(new Event('jarvis:ready'));
 }
 function selectProject(id) {
   S.projectId = id; localStorage.setItem('jarvis.project', id);

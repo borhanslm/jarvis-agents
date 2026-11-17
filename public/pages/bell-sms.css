@@ -1,0 +1,83 @@
+/* ---------- the bell (top bar) ---------- */
+.bell-wrap { position: relative; }
+#btnBell { position: relative; }
+.bell-n { position: absolute; top: 2px; inset-inline-end: 2px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; background: var(--color-danger); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; box-shadow: 0 0 0 2px var(--color-bg); }
+#btnBell.ring .ic { animation: bell-ring .9s ease-in-out; transform-origin: 50% 10%; }
+@keyframes bell-ring { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(14deg); } 40% { transform: rotate(-12deg); } 60% { transform: rotate(8deg); } 80% { transform: rotate(-4deg); } }
+@media (prefers-reduced-motion: reduce) { #btnBell.ring .ic { animation: none; } }
+.bell-pop { position: absolute; top: calc(100% + 8px); inset-inline-end: 0; z-index: 60; width: min(380px, calc(100vw - 24px)); max-height: min(560px, 75vh); display: flex; flex-direction: column; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-surface-1); box-shadow: 0 16px 40px rgb(0 0 0 / .45); overflow: hidden; }
+.bell-pop header, .bell-pop footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px; }
+.bell-pop header h2 { margin: 0; font-size: 15px; display: flex; align-items: center; gap: 6px; }
+.bell-pop footer { border-top: 1px solid var(--color-border-subtle); }
+.bell-pop .link { display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; color: var(--color-primary); cursor: pointer; font: inherit; font-size: 13px; padding: 6px 4px; }
+.bell-tabs { display: flex; gap: 4px; padding: 0 10px 8px; border-bottom: 1px solid var(--color-border-subtle); }
+.bell-tabs button { flex: 1; min-height: 36px; border: 0; border-radius: 8px; background: transparent; color: var(--color-fg-muted); cursor: pointer; font: inherit; }
+.bell-tabs button[aria-selected="true"] { background: var(--color-selected); color: var(--color-fg-strong); }
+.bell-chip { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--color-primary); color: var(--color-on-primary); font-size: 11px; }
+.bell-list { overflow-y: auto; padding: 6px; }
+.bell-item { width: 100%; display: flex; gap: 10px; align-items: flex-start; padding: 10px; border: 0; border-radius: 10px; background: transparent; color: var(--color-fg); text-align: start; font: inherit; cursor: pointer; }
+div.bell-item { cursor: default; }
+button.bell-item:hover, button.bell-item:focus-visible { background: var(--color-hover); }
+.bell-item.new { background: color-mix(in srgb, var(--color-primary) 7%, transparent); }
+.bell-item.new .bell-b b::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-inline-end: 6px; border-radius: 50%; background: var(--color-primary); vertical-align: middle; }
+.bell-ic { flex: none; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; background: var(--color-surface-2); color: var(--color-primary); }
+.bell-ic.k-sale { color: var(--color-warning); }
+.bell-ic.k-sms { color: var(--color-success); }
+.bell-ic.k-reminder { color: var(--color-claude); }
+.bell-b { min-width: 0; display: grid; gap: 2px; }
+.bell-b b { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.bell-b span { font-size: 13px; color: var(--color-fg-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bell-b small { font-size: 12px; color: var(--color-fg-muted); opacity: .8; }
+.bell-empty { display: grid; justify-items: center; gap: 8px; padding: 28px 12px; text-align: center; }
+.bell-empty .ic { width: 28px; height: 28px; opacity: .5; }
+.bell-foot { padding: 6px 10px; margin: 0; }
+
+/* ---------- SMS page ---------- */
+.sms-page { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.sms-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sms-grid { flex: 1; min-height: 420px; display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 12px; }
+.sms-list, .sms-conv { min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--color-border-subtle); border-radius: var(--card-radius, 12px); background: var(--color-surface-1); overflow: hidden; }
+.sms-search { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--color-border-subtle); color: var(--color-fg-muted); }
+.sms-search input { flex: 1; min-height: 36px; border: 0; background: transparent; color: var(--color-fg); font: inherit; outline: none; }
+.sms-list ul { list-style: none; margin: 0; padding: 6px; overflow-y: auto; }
+.sms-th { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 60px; padding: 8px 10px; border: 0; border-radius: 10px; background: transparent; color: var(--color-fg); text-align: start; font: inherit; cursor: pointer; }
+.sms-th:hover, .sms-th:focus-visible { background: var(--color-hover); }
+.sms-th.on { background: var(--color-selected); }
+.sms-av { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; background: var(--color-primary-soft); color: var(--color-primary); font-weight: 700; }
+.sms-th-b { min-width: 0; flex: 1; display: grid; }
+.sms-th-b b, .sms-th-b span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sms-th-b span { font-size: 13px; }
+.sms-th-t { flex: none; display: grid; justify-items: end; gap: 4px; font-size: 12px; color: var(--color-fg-muted); }
+.sms-code { padding: 1px 6px; border-radius: 6px; background: var(--color-primary-soft); color: var(--color-primary); font-family: var(--font-mono, monospace); }
+.sms-empty { padding: 16px; display: grid; gap: 8px; }
+.sms-skel { height: 52px; border-radius: 10px; background: linear-gradient(90deg, var(--color-surface-2), var(--color-surface-3), var(--color-surface-2)); background-size: 200% 100%; animation: sms-skel 1.4s linear infinite; }
+@keyframes sms-skel { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .sms-skel { animation: none; } }
+.sms-conv-h { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--color-border-subtle); }
+.sms-back { display: none; }
+.sms-to { flex: 1; display: flex; align-items: center; gap: 8px; margin: 0; }
+.sms-to input { flex: 1; }
+.sms-msgs { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.sms-msg { max-width: min(78%, 560px); display: grid; gap: 4px; }
+.sms-msg p { margin: 0; padding: 10px 14px; border-radius: 14px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sms-msg.in { align-self: flex-start; }
+.sms-msg.out { align-self: flex-end; }
+.sms-msg.in p { background: var(--color-surface-2); border-start-start-radius: 4px; }
+.sms-msg.out p { background: var(--color-primary-soft); border: 1px solid var(--color-primary-line); border-start-end-radius: 4px; }
+.sms-msg.pending { opacity: .75; }
+.sms-msg .help { font-size: 12px; }
+.sms-msg.out .help { text-align: end; }
+.sms-msg .link { border: 0; background: none; color: var(--color-primary); cursor: pointer; font: inherit; padding: 0; }
+.sms-none { flex: 1; display: grid; place-content: center; justify-items: center; gap: 8px; color: var(--color-fg-muted); }
+.sms-none .ic { width: 36px; height: 36px; opacity: .4; }
+.sms-hint { margin: auto; text-align: center; max-width: 40ch; }
+.sms-compose { display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px; border-top: 1px solid var(--color-border-subtle); }
+.sms-compose textarea { flex: 1; min-height: 44px; max-height: 160px; resize: none; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface-inset); color: var(--color-fg); font: inherit; line-height: 1.6; }
+.sms-compose textarea:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
+.sms-compose .btn { min-height: 44px; }
+@media (max-width: 899px) {
+  .sms-grid { grid-template-columns: minmax(0, 1fr); }
+  .sms-grid.has-sel .sms-list, .sms-grid:not(.has-sel) .sms-conv { display: none; }
+  .sms-back { display: inline-grid; }
+  .sms-compose .btn span { display: none; }
+}

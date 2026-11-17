@@ -240,6 +240,9 @@ const clubLib = require('./lib/club');
 const club = new clubLib.Club({ dataDir: DATA, secrets: setup.secrets, settings: () => store.settings(), defaultUrl: process.env.JARVIS_CLUB_URL !== undefined ? process.env.JARVIS_CLUB_URL : ((require('./package.json').jarvis || {}).clubUrl) || '' }); // the env var is for tests
 const clubView = () => ({ ...club.state(), deploy: clubDeploy, cfLogin: clubLogin });
 // admin-only things (selling, license keys, club setup): with a club only its admins; without one, the local owner
+// the bell: JARVIS's own notification list
+const { Notices, threads: smsThreads } = require('./lib/notices');
+const notices = new Notices(DATA, ev => broadcast(ev));
 const clubAdmin = () => { const st = club.state(); return !st.required || !!(st.loggedIn && st.user && st.user.role === 'admin'); };
 const ADMIN_ONLY = 'این بخش فقط برای مدیر است';
 const clubBroadcast = () => broadcast({ type: 'club', club: clubView() });
@@ -337,11 +340,47 @@ const brain = new Brain({ chat: chatLLM, context: voiceContext });
 // phone actions asked on the computer: queued for the paired Android app (it picks them up live, or when it opens)
 const phoneTasks = [];
 function sendToPhone(action, text) {
+  if (action.type === 'phone_sync') { const old = phoneTasks.findIndex(x => x.action.type === 'phone_sync' && x.action.params.what === action.params.what); if (old >= 0) phoneTasks.splice(old, 1); }
   const t = { id: require('crypto').randomUUID().slice(0, 12), action, text: String(text || '').slice(0, 300), at: Date.now() };
   phoneTasks.push(t); while (phoneTasks.length > 20) phoneTasks.shift();
   broadcast({ type: 'phoneTask', task: t });
   return { ok: true, sentToPhone: true, id: t.id };
 }
+// what the phone sent for the SMS page and the bell (kept in memory only, never on disk)
+const phoneData = { sms: null, smsAt: 0, notifications: null, notificationsAt: 0, asked: 0 };
+const phonePaired = () => !!(store.settings().mobileEnabled && mobile.list().length);
+function askPhoneSync(force) {
+  if (!phonePaired() || (!force && Date.now() - phoneData.asked < 2.5 * 6e4)) return false;
+  phoneData.asked = Date.now();
+  sendToPhone({ type: 'phone_sync', params: { what: 'sms' } }, 'به‌روزرسانی پیامک‌ها');
+  sendToPhone({ type: 'phone_sync', params: { what: 'notifications' } }, 'به‌روزرسانی اعلان‌ها');
+  return true;
+}
+setInterval(() => { try { askPhoneSync(); } catch {} }, 3 * 6e4).unref();
+function takePhoneData(what, data) {
+  if (what === 'sms' && Array.isArray(data.sms)) {
+    const sms = data.sms.slice(0, 300).map(m => ({ from: String(m.from || '').slice(0, 60), body: String(m.body || '').slice(0, 2000), date: +m.date || 0, out: !!m.out }));
+    const lastSeen = phoneData.sms ? Math.max(0, ...phoneData.sms.filter(m => !m.out).map(m => m.date)) : Infinity; // the first copy announces nothing
+    for (const m of sms.filter(x => !x.out && x.date > lastSeen).slice(0, 5).reverse()) notices.add({ kind: 'sms', title: 'پیامک از ⁨' + m.from + '⁩', body: m.body.slice(0, 200), section: 'sms', key: 'sms:' + m.from + ':' + m.date });
+    phoneData.sms = sms; phoneData.smsAt = Date.now();
+  }
+  if (what === 'notifications' && Array.isArray(data.notifications)) {
+    phoneData.notifications = data.notifications.slice(0, 50).map(n => ({ app: String(n.app || '').slice(0, 60), title: String(n.title || '').slice(0, 160), text: String(n.text || '').slice(0, 400), at: +n.at || +n.time || +n.date || 0 }));
+    phoneData.notificationsAt = Date.now();
+  }
+  broadcast({ type: 'phoneData', what });
+}
+// new purchase requests -> the bell (only for the admin, whose club account can see them)
+async function checkPurchases() {
+  if (!club.url() || !club.token() || !clubAdmin() || !club.state().loggedIn) return;
+  const r = await club.call('GET', '/api/admin/purchases?status=pending');
+  for (const p of (r && r.purchases) || []) {
+    if (notices.list.some(n => n.key === 'sale:' + p.id)) continue;
+    notices.add({ kind: 'sale', title: 'درخواست خرید تازه' + (p.amount ? ' — ' + p.amount : ''), body: [p.email || p.name, p.ref ? 'کد پیگیری ' + p.ref : ''].filter(Boolean).join(' · '), section: 'seller', key: 'sale:' + p.id });
+  }
+}
+setInterval(() => checkPurchases().catch(() => {}), 3 * 6e4).unref();
+setTimeout(() => checkPurchases().catch(() => {}), 20000).unref();
 // ---- Telegram / Bale assistant (two-way) ----
 const { Media } = require('./lib/media');
 const media = new Media(voiceAssets);
@@ -395,6 +434,7 @@ function fireReminder(t) {
   tasks.markReminded(t.id);
   const text = reminderText(t);
   broadcast({ type: 'reminder', task: t, text, speak: store.settings().remindSpeak !== false });
+  notices.add({ kind: 'reminder', title: text, section: 'tasks', key: 'rem:' + t.id });
   const s = store.settings(), token = setup.secrets.get('notifyToken');
   if (s.remindPhone !== false && s.notifyPhone && s.notifyChatId && token) notify.call(s.notifyPhone, token, 'sendMessage', { chat_id: s.notifyChatId, text: '⏰ ' + text, reply_markup: remindKeyboard(t) }).catch(e => console.error('reminder', e.message));
 }
@@ -449,6 +489,7 @@ const extChanged = () => { broadcast({ type: 'ext', ...extState() }); broadcast(
 const notify = require('./lib/notify');
 const STATUS_FA = { done: '✅ تمام شد', error: '❌ خطا', stopped: '⏹ متوقف شد', budget: '💰 سقف هزینه', 'needs-attention': '⚠️ نیاز به بررسی', unverified: '❔ تست‌نشده' };
 orch.onFinish = (chat, final, info) => {
+  notices.add({ kind: 'job', title: `${STATUS_FA[final] || final}: ${chat.title}`, body: info.project ? 'پروژه: ' + info.project.name : '', section: 'code', key: 'job:' + chat.id });
   const s = store.settings(chat.projectId);
   const token = setup.secrets.get('notifyToken');
   if (!s.notifyPhone || !token || !s.notifyChatId) return;
@@ -890,6 +931,12 @@ async function api(req, res, url) {
   }
   // ---- plain chat (any model) and the model list for it ----
   // Gemini free (Antigravity CLI): install with Google's script; sign in by running `agy` once (it opens the browser)
+  // the bell
+  if (parts[0] === 'notices') {
+    if (!parts[1] && m === 'GET') return send(res, 200, { notices: notices.recent(60), unread: notices.unread() });
+    if (parts[1] === 'read' && m === 'POST') return send(res, 200, { unread: notices.read(body && body.ids === 'all' ? 'all' : Array.isArray(body && body.ids) ? body.ids.map(String) : []) });
+    if (parts[1] === 'clear' && m === 'POST') { notices.clear(); return send(res, 200, { ok: true }); }
+  }
   if (parts[0] === 'agy') {
     const agy = require('./lib/agy'), { openTerminal } = require('./lib/setup');
     if (parts[1] === 'status' && m === 'GET') return send(res, 200, { installed: !!agy.agyCli(true) });
@@ -1223,13 +1270,25 @@ async function api(req, res, url) {
         return send(res, 200, { action: a, result });
       }
       // ---- jobs for the phone (asked on the computer, done by the Android app) ----
-      if (parts[1] === 'phone-tasks' && m === 'GET') return send(res, 200, { tasks: phoneTasks.filter(t => Date.now() - t.at < 15 * 6e4) });
+      if (parts[1] === 'phone-tasks' && m === 'GET') { askPhoneSync(); return send(res, 200, { tasks: phoneTasks.filter(t => Date.now() - t.at < 15 * 6e4) }); }
+      // the SMS page / bell: what the phone last sent, a fresh copy, and sending an SMS (the phone asks first)
+      if (parts[1] === 'phone-data' && m === 'GET') return send(res, 200, { paired: phonePaired(), threads: phoneData.sms ? smsThreads(phoneData.sms) : null, smsAt: phoneData.smsAt, notifications: phoneData.notifications, notificationsAt: phoneData.notificationsAt });
+      if (parts[1] === 'phone-sync' && m === 'POST') { if (!phonePaired()) throw new Error('گوشی جفت نشده («گوشی» ← جفت کردن)'); askPhoneSync(true); return send(res, 200, { ok: true }); }
+      if (parts[1] === 'phone-sms' && m === 'POST') {
+        if (!phonePaired()) throw new Error('گوشی جفت نشده («گوشی» ← جفت کردن)');
+        const to = String(body.to || '').trim().slice(0, 60), text = String(body.text || '').trim().slice(0, 1000);
+        if (!to || !text) throw new Error('گیرنده و متن پیامک لازم است');
+        return send(res, 200, sendToPhone({ type: 'phone_sms_send', params: { to, text } }, `پیامک به ${to}`));
+      }
       if (parts[1] === 'phone-result' && m === 'POST') {
         const t = phoneTasks.find(x => x.id === String(body.id || '')); if (!t) return send(res, 200, { ok: false });
         phoneTasks.splice(phoneTasks.indexOf(t), 1);
+        if (t.action.type === 'phone_sync') { if (body.ok && body.data && typeof body.data === 'object') takePhoneData(t.action.params.what, body.data); else broadcast({ type: 'phoneData', what: t.action.params.what, error: String(body.error || '').slice(0, 300) }); return send(res, 200, { ok: true }); }
+        if (t.action.type === 'phone_sms_send') { askPhoneSync(true); }
         const say = body.ok ? String(body.say || 'روی گوشی انجام شد.') : 'روی گوشی نشد: ' + String(body.error || '');
         voiceLog.push({ ts: Date.now(), user: '(گوشی)', say, action: t.action });
         broadcast({ type: 'phoneResult', id: t.id, ok: !!body.ok, say: say.slice(0, 600) });
+        notices.add({ kind: 'phone', title: (body.ok ? 'گوشی: ' : 'گوشی نتوانست: ') + (t.text || 'کار روی گوشی'), body: say.slice(0, 300), section: 'jarvis' });
         return send(res, 200, { ok: true });
       }
       if (parts[1] === 'reset' && m === 'POST') { brain.reset(); return send(res, 200, { ok: true }); }
