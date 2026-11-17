@@ -43,6 +43,10 @@ async function render() {
       ${card('C', 'Claude', claude && claude.ok ? (st.claudeAuth === 'api-key' ? 'با کلید API' : 'با ورود Claude Code') : 'وصل نیست', claude && claude.ok,
         modelRows(models.filter(m => m.group === 'Claude')), `<button type="button" class="btn btn-sm" data-setup="1">${ic('plug', 'sm')}اتصال حساب‌ها</button>`)}
       ${card('CX', 'Codex', codex && codex.ok ? 'نصب است · برای تیم کدنویسی' : 'نصب نیست', codex && codex.ok, `<p class="help">Codex CLI برای سازنده/تستر تیم کدنویسی استفاده می‌شود (چت ساده از آن استفاده نمی‌کند).</p>`, `<button type="button" class="btn btn-sm" data-setup="1">${ic('plug', 'sm')}اتصال حساب‌ها</button>`)}
+      ${(() => { const km = models.filter(m => m.spec === 'kimi'); return card('K', 'Kimi (حساب شما)', km.length ? 'با ورود حساب Kimi · بدون کلید API' : 'Kimi Code نصب نیست', km.length > 0,
+        km.length ? modelRows(km) + `<p class="help">با حساب Kimi خودتان و ابزار رسمی Kimi Code. اگر حساب شما سهمیه یا اشتراک لازم داشته باشد، خود Kimi می‌گوید.</p>`
+          : `<p class="help">Kimi را بدون کلید API و با حساب خودتان به کار ببرید (مثل ChatGPT با Codex). نصب با اسکریپت رسمی Kimi انجام می‌شود و به <a href="https://gitforwindows.org" target="_blank" rel="noopener" dir="ltr">Git for Windows</a> نیاز دارد.</p>`,
+        `<button type="button" class="btn btn-sm" data-kimi="install">${ic('download', 'sm')}${km.length ? 'نصب دوباره / به‌روزرسانی' : 'نصب Kimi Code'}</button><button type="button" class="btn btn-sm ${km.length ? 'btn-primary' : ''}" data-kimi="login">${ic('log-in', 'sm')}ورود به Kimi</button>`); })()}
       ${provs.map(p => card(MARK[p.preset] || p.name.slice(0, 2).toUpperCase(), p.name, `${esc(KIND[p.kind] || p.kind)}${p.hasKey ? '' : /^http:\/\/(localhost|127\.)/.test(p.baseUrl) ? ' · محلی' : ' · <span class="bad">کلید ندارد</span>'}`, p.hasKey || /^http:\/\/(localhost|127\.)/.test(p.baseUrl),
         modelRows(models.filter(m => m.spec.startsWith('p:' + p.id + ':'))),
         `<button type="button" class="btn btn-sm" data-edit="${esc(p.id)}">${ic('pencil', 'sm')}ویرایش</button><button type="button" class="btn btn-sm ghost danger" data-del="${esc(p.id)}">${ic('trash-2', 'sm')}حذف</button>`)).join('')}
@@ -68,9 +72,17 @@ function testHtml(r) {
 
 document.addEventListener('click', async e => {
   if (!el || !el.contains(e.target)) return;
-  const t = e.target.closest('[data-test],[data-edit],[data-del],[data-add],[data-setup],[data-pull],[data-olstart]');
+  const t = e.target.closest('[data-test],[data-edit],[data-del],[data-add],[data-setup],[data-pull],[data-olstart],[data-kimi]');
   if (!t) return;
   try {
+    if (t.dataset.kimi === 'install') {
+      const r = await api('/kimi/install', { body: {} });
+      window.toast(r.gitBash ? 'پنجره‌ی نصب Kimi Code باز شد؛ بعد از پایان، «ورود به Kimi» را بزنید.' : 'اول Git for Windows را نصب کنید (لینکش در همین کارت است)، بعد دوباره «نصب Kimi Code».', !r.gitBash);
+      // check again for a few minutes, so the card turns green when it is installed
+      let n = 0; const iv = setInterval(async () => { n++; const s = await api('/kimi/status').catch(() => ({})); if (s.installed || n > 40) { clearInterval(iv); if (s.installed) { window.toast('Kimi Code نصب شد'); render(); } } }, 6000);
+      return;
+    }
+    if (t.dataset.kimi === 'login') { await api('/kimi/login', { body: {} }); window.toast('پنجره‌ی ورود Kimi باز شد: لینک را باز کنید، وارد شوید و کد را وارد کنید. بعد «آزمایش» را بزنید.'); return; }
     if (t.dataset.test) {
       const spec = t.dataset.test; tests[spec] = 'wait';
       const out = el.querySelector(`[data-res="${CSS.escape(spec)}"]`); if (out) out.innerHTML = testHtml('wait');

@@ -158,6 +158,8 @@ async function chatModels() {
     out.push({ spec: 'p:' + p.id + ':' + m, name: m, group: p.name, note: p.hasKey || local ? '' : 'کلید ندارد', ok: p.hasKey || local, local });
   }
   // ChatGPT with the user's own ChatGPT sign-in, through the Codex CLI
+  // Kimi with the user's Kimi sign-in, through the Kimi Code CLI (no API key)
+  if (require('./lib/kimi').kimiCli()) out.push({ spec: 'kimi', name: 'Kimi', group: 'Kimi (حساب شما)', note: 'بدون کلید API', ok: true, local: false });
   if (agents.CLIS.codex) for (const m of codexModels()) out.push({ spec: 'chatgpt:' + m.slug, name: m.name, group: 'ChatGPT (حساب شما)', note: m.note, ok: true, local: false });
   for (const a of store.subagents().filter(x => x.stage === 'assistant' && x.enabled)) out.push({ spec: 'agent:' + a.id, name: a.name, group: 'ایجنت‌های من', note: a.description.slice(0, 40), ok: true, local: false, agent: true });
   const ol = await ollama.status();
@@ -886,6 +888,21 @@ async function api(req, res, url) {
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
   // ---- plain chat (any model) and the model list for it ----
+  // Kimi Code: install with the official script and sign in with the Kimi account (in a visible terminal; the user does it)
+  if (parts[0] === 'kimi') {
+    const kimi = require('./lib/kimi'), { openTerminal } = require('./lib/setup');
+    if (parts[1] === 'status' && m === 'GET') return send(res, 200, { installed: !!kimi.kimiCli(true), installCmd: process.platform === 'win32' ? kimi.INSTALL_WIN : kimi.INSTALL_UNIX });
+    if (parts[1] === 'install' && m === 'POST') {
+      const gitBash = require('./lib/agents').which('git').length > 0;
+      const ok = openTerminal(`${gitBash ? '' : 'Write-Host "Kimi Code needs Git for Windows: https://gitforwindows.org" -ForegroundColor Yellow; '}Write-Host "Installing Kimi Code (official script from code.kimi.com)..."; ${kimi.INSTALL_WIN}; Write-Host ""; Write-Host "Done. Now press Sign in to Kimi in JARVIS. You can close this window."`);
+      return send(res, 200, { ok, gitBash, cmd: kimi.INSTALL_WIN });
+    }
+    if (parts[1] === 'login' && m === 'POST') {
+      const k = kimi.kimiCli(true); if (!k) return send(res, 400, { error: 'اول Kimi Code را نصب کنید' });
+      const ok = openTerminal(`Write-Host "Sign in to Kimi: open the link, sign in, enter the code."; & '${(k.cmd).replace(/'/g, "''")}' ${k.pre.map(x => `'${x.replace(/'/g, "''")}'`).join(' ')} login; Write-Host ""; Write-Host "Done. You can close this window."`);
+      return send(res, 200, { ok });
+    }
+  }
   if (parts[0] === 'llms' && m === 'GET') { try { return send(res, 200, await chatModels()); } catch (e) { return send(res, 400, { error: e.message }); } }
   if (parts[0] === 'llms' && parts[1] === 'test' && m === 'POST') {
     const t0 = Date.now();
