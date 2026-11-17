@@ -354,7 +354,7 @@ const voiceContext = async (said = '') => {
     ...(ASKS_MESSAGES.test(said) ? {
       notices: notices.list.filter(n => !n.read).slice(-12).reverse().map(n => ({ kind: n.kind, title: n.title.replace(/[⁨⁩]/g, ''), body: n.body, ago: agoFa(n.at) })),
       phoneLinked: phonePaired(),
-      ...(phoneData.sms ? { sms: phoneData.sms.filter(m => !m.out).slice(0, 8).map(m => ({ from: m.from, body: m.body.slice(0, 220), ago: agoFa(m.date) })), smsAt: agoFa(phoneData.smsAt) } : {}),
+      ...(phoneData.sms ? { sms: phoneData.sms.filter(m => !m.out).slice(0, 8).map(m => ({ from: smsWho(m) || 'an unknown number (do not read the number aloud)', body: m.body.slice(0, 220), ago: agoFa(m.date) })), smsAt: agoFa(phoneData.smsAt) } : {}),
       ...(phoneData.notifications ? { phoneNotifications: phoneData.notifications.slice(0, 8) } : {}),
     } : {}),
     ...(ASKS_SALES.test(said) && clubAdmin() && club.url() && club.token() ? { purchases: await freshPurchases() } : {}),
@@ -392,22 +392,30 @@ function sendToPhone(action, text) {
   return { ok: true, sentToPhone: true, id: t.id };
 }
 // what the phone sent for the SMS page and the bell (kept in memory only, never on disk)
-const phoneData = { sms: null, smsAt: 0, notifications: null, notificationsAt: 0, asked: 0 };
+const phoneData = { sms: null, smsAt: 0, notifications: null, notificationsAt: 0, contacts: null, contactsAt: 0, asked: 0 };
 const phonePaired = () => !!(store.settings().mobileEnabled && mobile.list().length);
 function askPhoneSync(force) {
   if (!phonePaired() || (!force && Date.now() - phoneData.asked < 2.5 * 6e4)) return false;
   phoneData.asked = Date.now();
   sendToPhone({ type: 'phone_sync', params: { what: 'sms' } }, 'به‌روزرسانی پیامک‌ها');
   sendToPhone({ type: 'phone_sync', params: { what: 'notifications' } }, 'به‌روزرسانی اعلان‌ها');
+  if (force || Date.now() - phoneData.contactsAt > 6 * 3600e3) sendToPhone({ type: 'phone_sync', params: { what: 'contacts' } }, 'به‌روزرسانی مخاطبین'); // contacts change rarely
   return true;
 }
 setInterval(() => { try { askPhoneSync(); } catch {} }, 3 * 6e4).unref();
+// who sent it, said out loud: the contact name, or a sender name like «بانک ملت» — never a bare number
+const smsWho = m => m.name || (/\p{L}/u.test(m.from || '') && !/^[+\d\s()-]+$/.test(m.from || '') ? m.from : '');
 function takePhoneData(what, data) {
   if (what === 'sms' && Array.isArray(data.sms)) {
-    const sms = data.sms.slice(0, 300).map(m => ({ from: String(m.from || '').slice(0, 60), body: String(m.body || '').slice(0, 2000), date: +m.date || 0, out: !!m.out }));
+    const sms = data.sms.slice(0, 300).map(m => ({ from: String(m.from || '').slice(0, 60), ...(m.name ? { name: String(m.name).slice(0, 60) } : {}), body: String(m.body || '').slice(0, 2000), date: +m.date || 0, out: !!m.out }));
     const lastSeen = phoneData.sms ? Math.max(0, ...phoneData.sms.filter(m => !m.out).map(m => m.date)) : Infinity; // the first copy announces nothing
-    for (const m of sms.filter(x => !x.out && x.date > lastSeen).slice(0, 5).reverse()) notices.add({ kind: 'sms', title: 'پیامک از ⁨' + m.from + '⁩', body: m.body.slice(0, 200), section: 'sms', key: 'sms:' + m.from + ':' + m.date });
+    for (const m of sms.filter(x => !x.out && x.date > lastSeen).slice(0, 5).reverse()) notices.add({ kind: 'sms', title: smsWho(m) ? 'پیامک از ⁨' + smsWho(m) + '⁩' : 'پیامک تازه دارید', body: m.body.slice(0, 200), section: 'sms', key: 'sms:' + m.from + ':' + m.date });
     phoneData.sms = sms; phoneData.smsAt = Date.now();
+  }
+  if (what === 'contacts' && Array.isArray(data.contacts)) {
+    const seen = new Set();
+    phoneData.contacts = data.contacts.slice(0, 2000).map(c => ({ name: String(c.name || '').slice(0, 60), number: String(c.number || '').replace(/[^\d+]/g, '').slice(0, 20) })).filter(c => c.name && c.number && !seen.has(c.name + c.number) && seen.add(c.name + c.number));
+    phoneData.contactsAt = Date.now();
   }
   if (what === 'notifications' && Array.isArray(data.notifications)) {
     phoneData.notifications = data.notifications.slice(0, 50).map(n => ({ app: String(n.app || '').slice(0, 60), title: String(n.title || '').slice(0, 160), text: String(n.text || '').slice(0, 400), at: +n.at || +n.time || +n.date || 0 }));
@@ -1382,7 +1390,7 @@ async function api(req, res, url) {
       // ---- jobs for the phone (asked on the computer, done by the Android app) ----
       if (parts[1] === 'phone-tasks' && m === 'GET') { askPhoneSync(); return send(res, 200, { tasks: phoneTasks.filter(t => Date.now() - t.at < 15 * 6e4) }); }
       // the SMS page / bell: what the phone last sent, a fresh copy, and sending an SMS (the phone asks first)
-      if (parts[1] === 'phone-data' && m === 'GET') return send(res, 200, { paired: phonePaired(), threads: phoneData.sms ? smsThreads(phoneData.sms) : null, smsAt: phoneData.smsAt, notifications: phoneData.notifications, notificationsAt: phoneData.notificationsAt });
+      if (parts[1] === 'phone-data' && m === 'GET') return send(res, 200, { paired: phonePaired(), threads: phoneData.sms ? smsThreads(phoneData.sms) : null, smsAt: phoneData.smsAt, contacts: phoneData.contacts, contactsAt: phoneData.contactsAt, notifications: phoneData.notifications, notificationsAt: phoneData.notificationsAt });
       if (parts[1] === 'phone-sync' && m === 'POST') { if (!phonePaired()) throw new Error('گوشی جفت نشده («گوشی» ← جفت کردن)'); askPhoneSync(true); return send(res, 200, { ok: true }); }
       if (parts[1] === 'phone-sms' && m === 'POST') {
         if (!phonePaired()) throw new Error('گوشی جفت نشده («گوشی» ← جفت کردن)');

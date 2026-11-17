@@ -48,10 +48,17 @@ test('phone ↔ computer: SMS copy, new-SMS bell, sending through the phone', { 
     // a new SMS arrives: the next copy rings the bell
     await call('/voice/phone-sync', {});
     const job2 = (await phone('/voice/phone-tasks')).tasks.find(t => t.action.type === 'phone_sync' && t.action.params.what === 'sms');
-    await phone('/voice/phone-result', { id: job2.id, ok: true, data: { sms: [{ from: 'Reza', body: 'فردا ساعت ۱۰ جلسه داریم', date: T }, { from: 'Bank', body: 'کد ورود: 4821', date: T - 5000 }] } });
+    await phone('/voice/phone-result', { id: job2.id, ok: true, data: { sms: [{ from: '+989120000000', body: 'سلام', date: T + 1 }, { from: '+989351112233', name: 'مریم', body: 'رسیدی؟', date: T + 2 }, { from: 'Reza', body: 'فردا ساعت ۱۰ جلسه داریم', date: T }, { from: 'Bank', body: 'کد ورود: 4821', date: T - 5000 }] } });
     const nb = await call('/notices');
     const smsN = nb.notices.filter(n => n.kind === 'sms');
-    assert.equal(smsN.length, 1, 'only the new SMS'); assert.ok(/Reza/.test(smsN[0].title) && smsN[0].section === 'sms'); 
+    assert.equal(smsN.length, 3, 'only the new SMS');
+    const titles = smsN.map(n => n.title.replace(/[⁨⁩]/g, ''));
+    assert.ok(titles.includes('پیامک از Reza') && titles.includes('پیامک از مریم') && titles.includes('پیامک تازه دارید'), titles.join(' | '));
+    assert.ok(!titles.some(t => /\d{6}/.test(t)), 'numbers are never announced');
+    const ct = (await phone('/voice/phone-tasks')).tasks.find(t => t.action.params && t.action.params.what === 'contacts');
+    if (ct) await phone('/voice/phone-result', { id: ct.id, ok: true, data: { contacts: [{ name: 'مریم', number: '+98 935 111 2233' }] } });
+    const pd2 = await call('/voice/phone-data');
+    assert.equal(pd2.threads.find(t => t.from === '+989351112233').name, 'مریم');
     assert.ok(nb.unread >= 1);
     // writing an SMS on the computer: it becomes a job for the phone (the phone asks the user before sending)
     const sent = await call('/voice/phone-sms', { to: 'Reza', text: 'باشه، میام' });

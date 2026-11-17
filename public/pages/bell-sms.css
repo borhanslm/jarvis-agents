@@ -102,3 +102,7 @@ button.bell-item:hover, button.bell-item:focus-visible { background: var(--color
 .sk-pre { max-height: 300px; overflow: auto; white-space: pre-wrap; padding: 10px; border-radius: 8px; background: var(--color-surface-inset); font-size: 13px; }
 .sk-edit textarea { width: 100%; font-family: var(--font-mono, monospace); font-size: 13px; }
 @media (max-width: 700px) { .sk-ai-row { flex-direction: column; align-items: stretch; } }
+.sms-tabs { padding: 8px 10px; }
+.sms-contact { cursor: default; }
+.sms-contact .btn { flex: none; }
+.sms-th-b small { font-size: 12px; }

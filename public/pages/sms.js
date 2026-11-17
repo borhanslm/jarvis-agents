@@ -17,7 +17,7 @@ const when = ms => {
 const avatar = from => { const l = String(from || '').replace(/[^\p{L}]/gu, '')[0]; return `<span class="sms-av" aria-hidden="true">${l ? esc(l.toUpperCase()) : ic('smartphone', 'sm')}</span>`; };
 const codeIn = t => { const m = /(?:^|\D)(\d{4,8})(?!\d)/.exec(String(t || '').replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))); return m ? m[1] : null; };
 
-const S = { el: null, data: null, sel: null, q: '', waiting: false, sending: new Map(), newTo: false };
+const S = { el: null, data: null, sel: null, q: '', waiting: false, sending: new Map(), newTo: false, tab: 'sms', to: '' };
 
 function enter(host) { S.el = host; load(true); }
 function leave() { S.el = null; }
@@ -31,6 +31,13 @@ async function refresh(silent) {
   catch (e) { if (!silent) window.toast(e.message, true); }
 }
 
+function contactsHtml(d, q) {
+  if (d.contacts == null) return `<div class="sms-empty"><p class="help">${S.waiting ? 'در حال گرفتن از گوشی…' : 'هنوز مخاطبی از گوشی نیامده. «به‌روزرسانی» را بزنید؛ دسترسی «مخاطبین» در اپ گوشی باید روشن باشد.'}</p></div>`;
+  const list = d.contacts.map((c, i) => ({ ...c, i })).filter(c => !q || (c.name + ' ' + c.number).includes(q));
+  return list.length ? `<ul role="list">${list.slice(0, 300).map(c => `<li><div class="sms-th sms-contact">${avatar(c.name)}<span class="sms-th-b"><b dir="auto">${esc(c.name)}</b><small class="help" dir="ltr">${esc(c.number)}</small></span>
+    <button type="button" class="btn btn-sm" data-csms="${c.i}" aria-label="پیامک به ${esc(c.name)}">${ic('message-square', 'sm')}پیامک</button></div></li>`).join('')}</ul>${list.length > 300 ? `<p class="help sms-empty">${faN(list.length - 300)} مخاطب دیگر — جستجو کنید.</p>` : ''}`
+    : `<p class="help sms-empty">${q ? 'چیزی پیدا نشد.' : 'مخاطبی نیست.'}</p>`;
+}
 function render() {
   if (!S.el) return;
   const d = S.data || {};
@@ -49,24 +56,25 @@ function render() {
   }
   const all = d.threads || [];
   const q = S.q.trim();
-  const list = q ? all.filter(t => (t.from + ' ' + t.messages.map(m => m.body).join(' ')).includes(q)) : all;
+  const list = q ? all.filter(t => (t.from + ' ' + (t.name || '') + ' ' + t.messages.map(m => m.body).join(' ')).includes(q)) : all;
   if (!S.newTo && S.sel && !all.some(t => t.key === S.sel)) S.sel = null;
   if (!S.newTo && !S.sel && list[0] && matchMedia('(min-width: 900px)').matches) S.sel = list[0].key;
   const cur = all.find(t => t.key === S.sel);
   S.el.innerHTML = `<div class="pg sms-page">${head}
     <div class="sms-grid ${cur || S.newTo ? 'has-sel' : ''}">
       <aside class="sms-list" aria-label="گفتگوها">
-        <div class="sms-search">${ic('search', 'sm')}<input id="smsQ" type="search" placeholder="جستجو در پیامک‌ها" value="${esc(S.q)}" aria-label="جستجو در پیامک‌ها"></div>
-        ${d.threads == null ? `<div class="sms-empty">${S.waiting ? `<div class="sms-skel"></div><div class="sms-skel"></div><div class="sms-skel"></div><p class="help">اپ جارویس روی گوشی باید باز یا در پس‌زمینه وصل باشد.</p>` : `<p class="help">هنوز چیزی از گوشی نیامده. «به‌روزرسانی» را بزنید و اپ جارویس را روی گوشی باز کنید.</p>`}</div>`
+        <nav class="bell-tabs sms-tabs" role="tablist"><button type="button" role="tab" aria-selected="${S.tab === 'sms'}" data-stab="sms">گفتگوها</button><button type="button" role="tab" aria-selected="${S.tab === 'contacts'}" data-stab="contacts">مخاطبین${d.contacts ? ' (' + faN(d.contacts.length) + ')' : ''}</button></nav>
+        <div class="sms-search">${ic('search', 'sm')}<input id="smsQ" type="search" placeholder="${S.tab === 'contacts' ? 'جستجو در مخاطبین' : 'جستجو در پیامک‌ها'}" value="${esc(S.q)}" aria-label="جستجو"></div>
+        ${S.tab === 'contacts' ? contactsHtml(d, q) : d.threads == null ? `<div class="sms-empty">${S.waiting ? `<div class="sms-skel"></div><div class="sms-skel"></div><div class="sms-skel"></div><p class="help">اپ جارویس روی گوشی باید باز یا در پس‌زمینه وصل باشد.</p>` : `<p class="help">هنوز چیزی از گوشی نیامده. «به‌روزرسانی» را بزنید و اپ جارویس را روی گوشی باز کنید.</p>`}</div>`
           : list.length ? `<ul role="list">${list.map(t => { const code = !t.last.out && Date.now() - t.last.date < 30 * 6e4 && codeIn(t.last.body);
-            return `<li><button type="button" class="sms-th ${t.key === S.sel && !S.newTo ? 'on' : ''}" data-th="${esc(t.key)}">${avatar(t.from)}
-              <span class="sms-th-b"><b dir="auto">${esc(t.from)}</b><span dir="auto" class="help">${t.last.out ? 'شما: ' : ''}${esc(t.last.body.slice(0, 70))}</span></span>
+            return `<li><button type="button" class="sms-th ${t.key === S.sel && !S.newTo ? 'on' : ''}" data-th="${esc(t.key)}">${avatar(t.name || t.from)}
+              <span class="sms-th-b"><b dir="auto">${esc(t.name || t.from)}</b>${t.name ? `<small class="help" dir="ltr">${esc(t.from)}</small>` : ''}<span dir="auto" class="help">${t.last.out ? 'شما: ' : ''}${esc(t.last.body.slice(0, 70))}</span></span>
               <span class="sms-th-t">${esc(when(t.last.date))}${code ? `<span class="sms-code" dir="ltr">${esc(code)}</span>` : ''}</span></button></li>`; }).join('')}</ul>`
           : `<p class="help sms-empty">${q ? 'چیزی پیدا نشد.' : 'پیامکی نیست.'}</p>`}
       </aside>
       <section class="sms-conv" aria-label="گفتگو">
-        ${S.newTo ? `<header class="sms-conv-h"><button type="button" class="icon-btn sms-back" data-back aria-label="برگشت">${ic('chevron-right')}</button><div class="field sms-to"><label for="smsTo">به</label><input id="smsTo" dir="auto" placeholder="نام مخاطب یا شماره (مثل ۰۹۱۲…)" autocomplete="off"></div></header><div class="sms-msgs"><p class="help sms-hint">نام مخاطبِ ذخیره‌شده در گوشی یا شماره را بنویسید. گوشی قبل از فرستادن از شما می‌پرسد.</p></div>`
-          : cur ? `<header class="sms-conv-h"><button type="button" class="icon-btn sms-back" data-back aria-label="برگشت">${ic('chevron-right')}</button>${avatar(cur.from)}<b dir="auto">${esc(cur.from)}</b></header>
+        ${S.newTo ? `<header class="sms-conv-h"><button type="button" class="icon-btn sms-back" data-back aria-label="برگشت">${ic('chevron-right')}</button><div class="field sms-to"><label for="smsTo">به</label><input id="smsTo" dir="auto" list="smsContacts" value="${esc(S.to)}" placeholder="نام مخاطب یا شماره (مثل ۰۹۱۲…)" autocomplete="off"><datalist id="smsContacts">${(d.contacts || []).slice(0, 2000).map(c => `<option value="${esc(c.name)}">${esc(c.number)}</option>`).join('')}</datalist></div></header><div class="sms-msgs"><p class="help sms-hint">نام مخاطبِ ذخیره‌شده در گوشی یا شماره را بنویسید. گوشی قبل از فرستادن از شما می‌پرسد.</p></div>`
+          : cur ? `<header class="sms-conv-h"><button type="button" class="icon-btn sms-back" data-back aria-label="برگشت">${ic('chevron-right')}</button>${avatar(cur.name || cur.from)}<b dir="auto">${esc(cur.name || cur.from)}</b>${cur.name ? `<small class="help" dir="ltr">${esc(cur.from)}</small>` : ''}</header>
             <div class="sms-msgs" id="smsMsgs">${cur.messages.map(m => { const code = !m.out && codeIn(m.body); return `<div class="sms-msg ${m.out ? 'out' : 'in'}"><p dir="auto">${esc(m.body)}</p><span class="help">${esc(when(m.date))}${code ? ` · <button type="button" class="link" data-copy="${esc(code)}">کپی کد ${esc(code)}</button>` : ''}</span></div>`; }).join('')}
               ${[...S.sending.values()].filter(x => x.key === cur.key).map(x => `<div class="sms-msg out pending"><p dir="auto">${esc(x.text)}</p><span class="help">${x.error ? `<span class="bad">${esc(x.error)}</span>` : 'منتظر تأیید شما روی گوشی…'}</span></div>`).join('')}</div>`
           : `<div class="sms-none">${ic('messages-square')}<p class="help">یک گفتگو را انتخاب کنید.</p></div>`}
@@ -75,9 +83,17 @@ function render() {
     </div></div>`;
   const msgs = $('#smsMsgs', S.el); if (msgs) msgs.scrollTop = msgs.scrollHeight;
   const rb = $('#smsRefresh', S.el); if (rb) rb.onclick = () => refresh();
-  $('#smsNew', S.el).onclick = () => { S.newTo = true; S.sel = null; render(); setTimeout(() => { const t = $('#smsTo', S.el); if (t) t.focus(); }); };
+  $('#smsNew', S.el).onclick = () => { S.newTo = true; S.sel = null; S.to = ''; render(); setTimeout(() => { const t = $('#smsTo', S.el); if (t) t.focus(); }); };
   const qi = $('#smsQ', S.el); qi.oninput = () => { S.q = qi.value; clearTimeout(S.qt); S.qt = setTimeout(() => { render(); const n = $('#smsQ', S.el); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 200); };
   S.el.querySelectorAll('[data-th]').forEach(b => b.onclick = () => { S.sel = b.dataset.th; S.newTo = false; render(); });
+  S.el.querySelectorAll('[data-stab]').forEach(b => b.onclick = () => { S.tab = b.dataset.stab; S.q = ''; render(); });
+  S.el.querySelectorAll('[data-csms]').forEach(b => b.onclick = () => {
+    // an existing conversation with this person, or a new message to them
+    const c = (S.data.contacts || [])[+b.dataset.csms]; if (!c) return;
+    const k = c.number.replace(/^(\+98|0098)/, '0'), th = (S.data.threads || []).find(t => t.key === k);
+    if (th) { S.sel = th.key; S.newTo = false; S.tab = 'sms'; } else { S.newTo = true; S.sel = null; S.to = c.name; }
+    render(); setTimeout(() => { const t = $('#smsText', S.el); if (t) t.focus(); });
+  });
   S.el.querySelectorAll('[data-back]').forEach(b => b.onclick = () => { S.sel = null; S.newTo = false; render(); });
   S.el.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); window.toast('کد کپی شد'); } catch {} });
   const ta = $('#smsText', S.el);
@@ -101,6 +117,7 @@ function render() {
 
 window.addEventListener('jarvis:ev', e => {
   const ev = e.detail || {};
+  if (ev.type === 'phoneData' && ev.what === 'contacts' && S.el) load(false);
   if (ev.type === 'phoneData' && ev.what === 'sms') {
     S.waiting = false; clearTimeout(S.wt);
     if (ev.error && S.el) window.toast('گوشی: ' + ev.error, true);
