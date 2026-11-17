@@ -9,7 +9,8 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const ic = (n, c = '') => `<svg class="ic ${c}" aria-hidden="true"><use href="icons.svg#i-${n}"/></svg>`;
 const fa = n => (+n || 0).toLocaleString('fa-IR');
 const api = (...a) => window.api(...a);
-const WAKE_TEXT = /(جارویس|جاروس|جارویز|جاروِیس|jarvis|jervis)/i;
+// «جارویس» or «هی جارویس» — and the ways the offline speech engine tends to write it
+const WAKE_TEXT = /(جار+و+ی?[سزص]|جاروِ?ی?س|جارفیس|چارویس|ژارویس|جاوویس|جاویس|jarv[iy]s|jervis|javis|jarvas|jarbis)/i;
 
 const V = {
   state: 'off',            // off | idle | recording | thinking | speaking
@@ -34,6 +35,7 @@ window.jarvisVoice = {
   get state() { return V.state; }, get paused() { return V.paused; }, get micError() { return V.micError; },
   get level() { return V.state === 'speaking' ? outLevel() : Math.min(1, V.lastLevel * 18); },
   get log() { return V.log; },
+  get localStt() { return !!V.localStt; }, get wakeModel() { return !!V.ww; },
   ask: text => { const t = String(text || '').trim(); if (!t) return; addLog('user', t); return ask(t); },
   talk: () => { if (V.state === 'off') start(true); else if (V.state === 'recording') finishRecording(); else startRecording(false); },
   stopSpeaking: () => { stopSpeaking(); if (V.state === 'speaking') setState('idle'); },
@@ -229,7 +231,7 @@ async function speakText(text, { thenListen = false } = {}) {
       if (V.out.c.state === 'suspended') V.out.c.resume().catch(() => {});
       if (V.out.c.state === 'running') V.out.c.createMediaElementSource(a).connect(V.out.an); // never route into a stopped context (it would be silent)
     } catch {}
-    a.onended = () => { URL.revokeObjectURL(url); if (V.audio === a) { V.audio = null; afterSpeech(thenListen || true); } };
+    a.onended = () => { URL.revokeObjectURL(url); if (V.audio === a) { V.audio = null; afterSpeech(thenListen); } };
     await a.play();
   } catch (e) {
     // free voice still downloading: say it once, quietly, and keep answering in text
@@ -240,7 +242,8 @@ async function speakText(text, { thenListen = false } = {}) {
   }
 }
 function stopSpeaking() { if (V.audio) { V.audio.pause(); V.audio = null; } }
-// after an answer, listen a few seconds for a follow-up without the wake word
+// after an answer: back to waiting for «جارویس» / «هی جارویس». Only when JARVIS asked something
+// (yes/no, «منظورتان X بود؟») it listens a few seconds for the answer without the wake word.
 function afterSpeech(listen) {
   if (V.state === 'off') return;
   if (listen && V.stream) { setTimeout(() => { if (V.state === 'speaking' || V.state === 'thinking' || V.state === 'idle') startRecording(true); }, 250); }
@@ -269,7 +272,7 @@ function ui() {
   el.querySelector('#vdClose').onclick = () => stop();
   return el;
 }
-const STATE_FA = { off: 'خاموش', idle: 'منتظر «هی جارویس»', recording: 'در حال گوش دادن…', thinking: 'در حال فکر کردن…', speaking: 'در حال صحبت…' };
+const STATE_FA = { off: 'خاموش', idle: 'منتظر «جارویس»', recording: 'در حال گوش دادن…', thinking: 'در حال فکر کردن…', speaking: 'در حال صحبت…' };
 function setState(s, hint) {
   V.state = s;
   const el = ui();

@@ -11,7 +11,7 @@ const V = () => window.jarvisVoice || { state: 'off', level: 0, log: [] };
 
 const STATE = {
   off: { label: 'گوش دادن مکث شده', sub: 'برای ادامه، دکمه‌ی پخش را بزنید', rgb: [110, 130, 150] },
-  idle: { label: 'منتظر «هی جارویس»', sub: 'بگویید «هی جارویس»، روی گوی بزنید یا بنویسید', rgb: [79, 216, 255] },
+  idle: { label: 'منتظر «جارویس»', sub: 'بگویید «جارویس» یا «هی جارویس»، روی گوی بزنید یا بنویسید', rgb: [79, 216, 255] },
   recording: { label: 'گوش می‌دهم…', sub: 'صحبت کنید؛ وقتی ساکت شوید می‌فهمم تمام شد', rgb: [62, 255, 168] },
   thinking: { label: 'در حال فکر کردن…', sub: '', rgb: [180, 140, 255] },
   speaking: { label: 'در حال صحبت…', sub: 'برای قطع، روی گوی بزنید', rgb: [255, 183, 71] },
@@ -68,7 +68,9 @@ function status() {
   const v = V(), s = STATE[v.state] || STATE.idle;
   const micErr = v.state === 'off' && v.micError;
   $('#jvState', P.el).textContent = micErr ? 'میکروفون در دسترس نیست' : s.label;
-  $('#jvSub', P.el).textContent = micErr ? v.micError + ' — از تنظیمات (چرخ‌دنده) میکروفون را انتخاب کنید. نوشتن همیشه کار می‌کند.' : s.sub;
+  // «جارویس» on its own is heard by the offline speech engine; without it only "Hey Jarvis" (English model) wakes it
+  const noLocal = v.state === 'idle' && v.localStt === false && (st().settings || {}).voiceWake !== false;
+  $('#jvSub', P.el).textContent = micErr ? v.micError + ' — از تنظیمات (چرخ‌دنده) میکروفون را انتخاب کنید. نوشتن همیشه کار می‌کند.' : noLocal ? 'فعلاً فقط «هی جارویس» — برای «جارویس» تنها، «موتور گفتار» را از تنظیمات ← اجزای آفلاین دانلود کنید (همه چیز روی همین کامپیوتر می‌ماند).' : s.sub;
   const pb = $('#jvPause', P.el); pb.innerHTML = ic(v.state === 'off' ? 'play' : 'pause'); pb.setAttribute('aria-label', v.state === 'off' ? 'ادامه‌ی گوش دادن' : 'مکث گوش دادن');
   $('#jvMic', P.el).classList.toggle('on', v.state === 'recording');
   P.el.querySelector('.jv').dataset.state = v.state;
