@@ -25,7 +25,8 @@ test('pair once with the code, then only allowed sections; revoke works', async 
     assert.strictEqual((await fetch(base + '/m/api/tasks')).status, 401);
     assert.strictEqual((await fetch(base + '/m/api/tasks', { headers: H })).status, 200);
     assert.deepStrictEqual(seen, ['/api/tasks']);
-    for (const blocked of ['settings', 'seller', 'backup', 'providers', 'notify']) assert.strictEqual((await fetch(base + '/m/api/' + blocked, { headers: H })).status, 403, blocked);
+    for (const blocked of ['settings', 'seller', 'seller/backup', 'seller/keys', 'seller/issue', 'backup', 'providers', 'notify']) assert.strictEqual((await fetch(base + '/m/api/' + blocked, { headers: H })).status, 403, blocked);
+    assert.notStrictEqual((await fetch(base + '/m/api/seller/purchases', { headers: H })).status, 403, 'purchase requests are reachable');
     assert.strictEqual((await fetch(base + '/m/api/events?dt=' + r.token)).status, 200); // SSE uses a query token
     assert.ok(!JSON.stringify(m.list()).includes(r.token)); // only a hash is stored
     m.revoke(m.list()[0].id);
