@@ -229,6 +229,7 @@ function openSection(o) {
   const go = {
     home: () => (window.showSection ? window.showSection('cc') : window.goHome && window.goHome()), settings: () => window.settingsDialog && window.settingsDialog('global'),
     connectors: () => window.extDialog && window.extDialog('connectors'), plugins: () => window.extDialog && window.extDialog('plugins'),
+    skills: () => (window.openSkills ? window.openSkills() : window.extDialog && window.extDialog('skills')), calendar: () => window.showSection && window.showSection('mail'),
     queue: () => window.queueDialog && window.queueDialog(), ops: () => window.openOps && window.openOps(), voice: () => (window.showSection ? window.showSection('jarvis') : window.voiceDialog()),
     chat: () => (o.chat && window.openChat ? (window.showSection && window.showSection('code'), window.openChat(o.chat)) : window.showSection && window.showSection('chat')),
   }[o.section];

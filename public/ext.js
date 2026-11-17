@@ -136,6 +136,8 @@ function connectorsHtml() {
   return `<p class="help">${ic('info', 'sm')} اتصال‌دهنده‌ها همان سرورهای MCP هستند که Claude Code هم استفاده می‌کند. هر کدام را می‌توانید فقط به سازنده، تستر یا ساب‌ایجنت‌ها بدهید؛ روی همه‌ی موتورها (Claude، Codex و اتصال‌هایی مثل DeepSeek) کار می‌کند.</p>
     <div class="ext-list">${rows}</div>
     <h4>افزودن</h4><div class="cat-grid">${cat}
+      <button type="button" class="cat-card" data-openmail=""><span class="ext-ic">${ic('mail')}</span><b>ایمیل (Gmail، Yahoo، …)</b><span class="help">خواندن صندوق، نوشتن و جواب با هوش مصنوعی — ارسال فقط با تأیید شما</span></button>
+      <button type="button" class="cat-card" data-openmail=""><span class="ext-ic">${ic('calendar')}</span><b>تقویم (Google، Outlook، Apple)</b><span class="help">رویدادهای پیش‌رو برای جارویس و یادآوری ۱۵ دقیقه قبل</span></button>
       <button type="button" class="cat-card custom" data-cnadd=""><span class="ext-ic">${ic('plus')}</span><b>اتصال‌دهنده‌ی دلخواه</b><span class="help">هر سرور MCP: یک فرمان (مثل npx …) یا یک آدرس https</span></button></div>`;
 }
 
@@ -217,6 +219,7 @@ async function installPlugin(body, btn) {
 async function extClick(e) {
   const t = e.target;
   const tab = t.closest('[data-exttab]'); if (tab) { extDialog(tab.dataset.exttab); return; }
+  if (t.closest('[data-openmail]')) { $('#dlg').close(); window.showSection && window.showSection('mail'); return; }
   const sko = t.closest('[data-skopen]'); if (sko) { $('#dlg').close(); window.openSkills ? window.openSkills(sko.dataset.skopen) : window.showSection && window.showSection('skills'); return; }
   const add = t.closest('[data-cnadd]');
   if (add) { const c = (S.connectorCatalog || []).find(x => x.key === add.dataset.cnadd); connectorForm(c ? { ...c, catalog: c.key, secrets: (c.secrets || []).map(s => ({ ...s, set: false })) } : { roles: { builder: true, reviewer: true, subs: false } }); return; }

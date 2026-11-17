@@ -106,3 +106,31 @@ button.bell-item:hover, button.bell-item:focus-visible { background: var(--color
 .sms-contact { cursor: default; }
 .sms-contact .btn { flex: none; }
 .sms-th-b small { font-size: 12px; }
+
+/* ---- email & calendar ---- */
+.mail-grid { flex: 1; min-height: 460px; display: grid; grid-template-columns: minmax(260px, 360px) minmax(0, 1fr) minmax(220px, 300px); gap: 12px; }
+.mail-ul { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1; }
+.mail-subj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sms-th.unread b { color: var(--color-fg-strong); }
+.sms-th.unread .mail-subj { color: var(--color-fg); font-weight: 600; }
+.mail-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-primary); box-shadow: 0 0 8px var(--color-primary); }
+.mail-h { flex-wrap: wrap; align-items: flex-start; }
+.mail-hb { flex: 1; min-width: 200px; display: grid; gap: 4px; }
+.mail-hb h2 { margin: 0; font-size: var(--text-lg, 18px); }
+.mail-body { flex: 1; overflow-y: auto; padding: 16px 18px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+.mail-att { padding: 10px 16px; border-top: 1px solid var(--color-border-subtle); }
+.mail-compose { flex: 1; overflow-y: auto; padding: 14px 16px; display: grid; gap: 10px; align-content: start; }
+.mail-compose .field { margin: 0; }
+.mail-ai { display: grid; gap: 6px; padding: 10px; border-radius: 10px; background: var(--color-primary-soft); }
+.mail-ai .sk-ai-row { display: flex; gap: 8px; }
+.mail-ai input { flex: 1; }
+.mail-text textarea { min-height: 220px; }
+.mail-ev { list-style: none; margin: 0; padding: 8px; overflow-y: auto; flex: 1; display: grid; gap: 6px; align-content: start; }
+.mail-ev li { display: grid; gap: 2px; padding: 8px 10px; border-radius: 8px; border-inline-start: 3px solid var(--ev, var(--color-primary)); background: var(--color-surface-2); }
+.mail-setup { margin-bottom: 12px; }
+.mail-setup-g { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 24px; }
+.mail-setup-g > div { display: grid; gap: 8px; align-content: start; }
+.mail-setup-g h2 { margin: 0; }
+@media (max-width: 1250px) { .mail-grid { grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); } .mail-cal { grid-column: 1 / -1; max-height: 280px; } }
+@media (max-width: 760px) { .mail-grid { grid-template-columns: 1fr; } }
+@media (min-width: 1900px) { .mail-grid { grid-template-columns: minmax(320px, 440px) minmax(0, 1fr) minmax(280px, 380px); } }
