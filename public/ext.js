@@ -81,13 +81,39 @@ function extDialog(tab) {
   if (tab) extTab = tab;
   const tabs = `<div class="ext-tabs" role="tablist">
     <button type="button" role="tab" class="${extTab === 'connectors' ? 'on' : ''}" data-exttab="connectors">${ic('plug', 'sm')}اتصال‌دهنده‌ها (MCP)</button>
-    <button type="button" role="tab" class="${extTab === 'plugins' ? 'on' : ''}" data-exttab="plugins">${ic('puzzle', 'sm')}پلاگین‌ها</button></div>`;
-  dialog(`<div class="dlg-scroll"><h3>${ic('puzzle')}اتصال‌دهنده‌ها و پلاگین‌ها</h3>${tabs}<div id="extBody" class="ext-body">${extTab === 'connectors' ? connectorsHtml() : pluginsHtml()}</div></div>
+    <button type="button" role="tab" class="${extTab === 'plugins' ? 'on' : ''}" data-exttab="plugins">${ic('puzzle', 'sm')}پلاگین‌ها</button>
+    <button type="button" role="tab" class="${extTab === 'skills' ? 'on' : ''}" data-exttab="skills">${ic('graduation-cap', 'sm')}اسکیل‌ها</button></div>`;
+  dialog(`<div class="dlg-scroll"><h3>${ic('puzzle')}اتصال‌دهنده‌ها، پلاگین‌ها و اسکیل‌ها</h3>${tabs}<div id="extBody" class="ext-body">${extBodyHtml()}</div></div>
     <div class="dlg-actions"><button class="btn ghost" value="cancel">بستن</button></div>`, true);
   $('#dlgBody').onclick = extClick;
+  if (extTab === 'skills') loadSkills();
 }
 window.extDialog = extDialog;
-window.onExtChanged = () => { const b = document.getElementById('extBody'); if (b && $('#dlg').open && !document.getElementById('cnForm')) b.innerHTML = extTab === 'connectors' ? connectorsHtml() : pluginsHtml(); };
+const extBodyHtml = () => extTab === 'connectors' ? connectorsHtml() : extTab === 'skills' ? skillsHtml() : pluginsHtml();
+
+// ---------- skills (the full editor is the Skills page; this tab lists them and starts the common actions) ----------
+let skillList = null;
+async function loadSkills() {
+  try { skillList = await api('/skills'); } catch { skillList = skillList || []; }
+  const b = document.getElementById('extBody'); if (b && extTab === 'skills' && $('#dlg').open) b.innerHTML = skillsHtml();
+}
+const SK_SRC = { custom: 'ساخت شما', imported: 'وارد‌شده', uploaded: 'آپلودشده', voice: 'یادگرفته با صدا' };
+function skillsHtml() {
+  const list = skillList;
+  const rows = list == null ? '<div class="help empty-note">در حال خواندن…</div>' : list.length ? list.map(s => `<div class="ext-row">
+      <span class="ext-ic">${ic('book-open')}</span>
+      <div class="ext-main"><b dir="ltr">${esc(s.name)}</b>${s.source ? `<span class="pill">${esc(SK_SRC[s.source] || s.source)}</span>` : ''}<div class="help" dir="auto">${esc(s.description || '')}</div></div>
+      <div class="ext-acts"><button type="button" class="btn small ghost" data-skopen="">${ic('pencil', 'sm')}ویرایش</button></div></div>`).join('')
+    : '<div class="help empty-note">هنوز اسکیلی ندارید.</div>';
+  return `<p class="help">${ic('info', 'sm')} اسکیل یعنی «روش انجام یک کار» که ایجنت‌ها و جارویس دنبالش می‌کنند. پلاگین‌ها هم اسکیل می‌آورند؛ به جارویس هم می‌شود با صدا گفت «یادت بگیر وقتی گفتم … این کارها را بکن».</p>
+    <div class="row-gap"><button type="button" class="btn primary small" data-skopen="ai">${ic('sparkles', 'sm')}ساخت با هوش مصنوعی</button>
+      <button type="button" class="btn small" data-skopen="upload">${ic('upload', 'sm')}آپلود (SKILL.md یا zip)</button>
+      <button type="button" class="btn small ghost" data-skopen="new">${ic('plus', 'sm')}نوشتن دستی</button>
+      <button type="button" class="btn small ghost" data-skopen="">${ic('external-link', 'sm')}صفحه‌ی کامل اسکیل‌ها</button></div>
+    <h4>کتابخانه${list ? ` (${fa(list.length)})` : ''}</h4><div class="ext-list">${rows}</div>`;
+}
+window.onExtChanged = () => { const b = document.getElementById('extBody'); if (b && $('#dlg').open && !document.getElementById('cnForm')) b.innerHTML = extBodyHtml(); };
+window.addEventListener('jarvis:ev', e => { if (e.detail && e.detail.type === 'skills') { skillList = e.detail.skills; window.onExtChanged(); } });
 
 function connectorsHtml() {
   const list = S.connectors || [];
@@ -191,6 +217,7 @@ async function installPlugin(body, btn) {
 async function extClick(e) {
   const t = e.target;
   const tab = t.closest('[data-exttab]'); if (tab) { extDialog(tab.dataset.exttab); return; }
+  const sko = t.closest('[data-skopen]'); if (sko) { $('#dlg').close(); window.openSkills ? window.openSkills(sko.dataset.skopen) : window.showSection && window.showSection('skills'); return; }
   const add = t.closest('[data-cnadd]');
   if (add) { const c = (S.connectorCatalog || []).find(x => x.key === add.dataset.cnadd); connectorForm(c ? { ...c, catalog: c.key, secrets: (c.secrets || []).map(s => ({ ...s, set: false })) } : { roles: { builder: true, reviewer: true, subs: false } }); return; }
   const ed = t.closest('[data-cnedit]'); if (ed) { connectorForm((S.connectors || []).find(c => c.id === ed.dataset.cnedit)); return; }

@@ -20,14 +20,14 @@ const SECTIONS = [
   { id: 'bot', icon: 'send', label: 'دستیار تلگرام / بله', go: () => { window.__ntReturn = () => {}; window.notifyDialog && window.notifyDialog(); } },
   { id: 'ops', icon: 'activity', label: 'اتاق عملیات', go: () => window.openOps && window.openOps() },
   { id: 'queue', icon: 'clock', label: 'صف کارها', go: () => window.queueDialog && window.queueDialog() },
-  { id: 'ext', icon: 'puzzle', label: 'اتصال‌ها و پلاگین‌ها', go: () => window.extDialog && window.extDialog() },
+  { id: 'ext', icon: 'puzzle', label: 'اتصال‌ها، پلاگین‌ها و اسکیل‌ها', go: () => window.extDialog && window.extDialog() },
 ];
 
 // Other modules add full-page sections: registerView(id, { icon, label, enter(el), leave() })
 const VIEWS = window.JARVIS_VIEWS || (window.JARVIS_VIEWS = {});
 window.registerView = (id, def) => { VIEWS[id] = def; };
 function buildRail() {
-  const extra = Object.entries(VIEWS).filter(([, v]) => !v.when || v.when()).map(([id, v]) => ({ id, icon: v.icon, label: v.label, end: !!v.end, go: () => show(id) }));
+  const extra = Object.entries(VIEWS).filter(([, v]) => !v.norail && (!v.when || v.when())).map(([id, v]) => ({ id, icon: v.icon, label: v.label, end: !!v.end, go: () => show(id) }));
   SECTIONS.splice(2, 0, ...extra.filter(x => !x.end));
   SECTIONS.push(...extra.filter(x => x.end)); // e.g. settings: last in the rail
   const layout = $('.layout');
@@ -69,7 +69,7 @@ window.rebuildRail = () => {
   const old = $('#rail'); if (!old) return;
   const base = SECTIONS.filter(s => !VIEWS[s.id]);
   SECTIONS.length = 0; SECTIONS.push(...base);
-  const extra = Object.entries(VIEWS).filter(([, v]) => !v.when || v.when()).map(([id, v]) => ({ id, icon: v.icon, label: v.label, end: !!v.end, go: () => show(id) }));
+  const extra = Object.entries(VIEWS).filter(([, v]) => !v.norail && (!v.when || v.when())).map(([id, v]) => ({ id, icon: v.icon, label: v.label, end: !!v.end, go: () => show(id) }));
   SECTIONS.splice(2, 0, ...extra.filter(x => !x.end)); SECTIONS.push(...extra.filter(x => x.end));
   old.innerHTML = SECTIONS.map(s => `<button type="button" class="rail-btn ${s.id === current ? 'on' : ''}" data-sec="${s.id}" title="${esc(s.label)}" aria-label="${esc(s.label)}">${ic(s.icon)}<span>${esc(s.label)}</span></button>`).join('');
   for (const [id, v] of Object.entries(VIEWS)) if (!document.getElementById('view-' + id)) { const el = document.createElement('section'); el.id = 'view-' + id; el.className = 'page-view ' + (v.className || ''); el.setAttribute('aria-label', v.label); $('.layout').append(el); v.el = el; }

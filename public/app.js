@@ -1689,6 +1689,7 @@ function paletteItems() {
     { icon: 'folder-plus', label: 'افزودن پروژه', run: () => addProjectDialog() },
     { icon: 'palette', label: 'ظاهر برنامه (۱۲ مدل)', run: skinDialog },
     { icon: 'puzzle', label: 'اتصال‌دهنده‌ها و پلاگین‌ها', run: () => extDialog('connectors') },
+    { icon: 'graduation-cap', label: 'اسکیل‌ها', run: () => extDialog('skills') },
     { icon: 'clock', label: 'صف کارها (اجرای شبانه)', run: () => queueDialog() },
     { icon: 'radar', label: 'اتاق عملیات سه‌بعدی', run: () => window.openOps && openOps() },
     { icon: 'sun', label: 'تغییر تم', run: () => $('#btnTheme').click() },

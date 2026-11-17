@@ -17,7 +17,7 @@ function render() {
   K.el.innerHTML = `<div class="pg sk-page">
     <header class="pg-head"><div><h1>${ic('graduation-cap')}اسکیل‌ها<span class="hud-tag" aria-hidden="true">SKILLS</span></h1>
       <p class="help">اسکیل یعنی «روش انجام یک کار» که ایجنت‌ها و جارویس دنبالش می‌کنند. با هوش مصنوعی بسازید، دستی بنویسید یا فایلش را آپلود کنید.</p></div>
-      <div class="sk-actions"><button type="button" class="btn" id="skUpBtn">${ic('upload', 'sm')}آپلود اسکیل</button><button type="button" class="btn btn-primary" id="skNew">${ic('plus', 'sm')}اسکیل تازه</button>
+      <div class="sk-actions"><button type="button" class="btn ghost" id="skBack" title="اتصال‌ها، پلاگین‌ها و اسکیل‌ها">${ic('puzzle', 'sm')}اتصال‌ها و پلاگین‌ها</button><button type="button" class="btn" id="skUpBtn">${ic('upload', 'sm')}آپلود اسکیل</button><button type="button" class="btn btn-primary" id="skNew">${ic('plus', 'sm')}اسکیل تازه</button>
         <input type="file" id="skFile" accept=".md,.markdown,.zip,.txt" hidden></div></header>
     <section class="sl-card sk-ai"><h2>${ic('sparkles', 'sm')}ساخت با هوش مصنوعی</h2>
       <p class="help">بنویسید اسکیل چه کار کند؛ جارویس متنش را می‌نویسد و شما قبل از ذخیره می‌بینید و ویرایش می‌کنید.</p>
@@ -60,6 +60,7 @@ function bind() {
   const el = K.el;
   $('#skNew', el).onclick = () => { K.edit = { name: '', description: '', body: '## When to use\n\n## Steps\n1. \n\n## Output\n' }; K.preview = null; render(); $('#skName', el).focus(); };
   $('#skUpBtn', el).onclick = () => $('#skFile', el).click();
+  $('#skBack', el).onclick = () => window.extDialog && window.extDialog('skills');
   $('#skFile', el).onchange = e => upload(e.target.files[0]);
   // drag a file anywhere on the page
   el.ondragover = e => { e.preventDefault(); el.classList.add('sk-dragging'); };
@@ -89,4 +90,14 @@ function bind() {
 window.addEventListener('jarvis:ev', e => { if (e.detail && e.detail.type === 'skills' && K.el && !K.edit && !K.preview) { K.list = e.detail.skills; render(); } });
 
 window.registerView = window.registerView || ((id, def) => { (window.JARVIS_VIEWS = window.JARVIS_VIEWS || {})[id] = def; });
-window.registerView('skills', { icon: 'graduation-cap', label: 'اسکیل‌ها', enter, leave });
+// lives inside «اتصال‌ها، پلاگین‌ها و اسکیل‌ها» (a tab there opens this page), so no rail button of its own
+window.registerView('skills', { icon: 'graduation-cap', label: 'اسکیل‌ها', norail: true, enter, leave });
+window.openSkills = (what) => {
+  window.showSection && window.showSection('skills');
+  setTimeout(() => {
+    if (!K.el) return;
+    if (what === 'ai') { const i = $('#skIdea', K.el); if (i) { i.focus(); i.scrollIntoView({ block: 'center' }); } }
+    if (what === 'upload') $('#skFile', K.el).click();
+    if (what === 'new') $('#skNew', K.el).click();
+  }, 60);
+};
