@@ -14,12 +14,12 @@ function buildSmartPlan(m) {
   d.className = 'msg system';
   const plan = m.plan || [];
   const waiting = !m.approved && S.chat && S.chat.status === 'waiting';
-  const opts = v => modelOptions('claude', v).filter(([x]) => x && x !== '__custom');
+  const opts = v => { const o = modelOptions('claude', v).filter(([x]) => x && x !== '__custom'); return m.split && !o.some(([x]) => x === 'codex') ? [['codex', 'Codex'], ...o] : o; };
   const saving = m.topUsd > 0 ? Math.max(0, Math.round((1 - m.estUsd / m.topUsd) * 100)) : 0;
   d.innerHTML = `<div class="smartcard" data-smartid="${esc(m.id)}">
-    <div class="tc-head">${ic('sparkles')}<b>تقسیم کار هوشمند</b><span class="help">${fa(plan.length)} بخش · هر بخش با مدلی که لازم دارد</span></div>
+    <div class="tc-head">${ic(m.split ? 'network' : 'sparkles')}<b>${m.split ? 'تقسیم بین هوش‌ها' : 'تقسیم کار هوشمند'}</b><span class="help">${fa(plan.length)} بخش · ${m.split ? 'هر بخش با یک هوش؛ بخش‌های «هم‌زمان» با هم انجام می‌شوند' : 'هر بخش با مدلی که لازم دارد'}</span></div>
     <ol class="sp-list">${plan.map((p, i) => `<li>
-      <span class="lvl ${esc(p.level)}">${LEVEL_FA[p.level] || esc(p.level)}</span>
+      <span class="lvl ${esc(p.level || '')}">${p.levelFa ? esc(p.levelFa) : LEVEL_FA[p.level] || esc(p.level)}</span>
       <span class="sp-title" dir="auto">${esc(p.title)}</span>
       ${waiting ? `<select data-spmodel="${i}" dir="ltr" aria-label="مدل بخش ${i + 1}">${opts(p.model).map(([v, l]) => `<option value="${esc(v)}" ${v === p.model ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`
         : `<span class="sp-model" dir="ltr">${esc(p.label || prettyModel(p.model))}</span>`}
@@ -223,7 +223,7 @@ $('#btnExt').onclick = () => extDialog();
 
 // ---------- task queue ----------
 const QSTATUS = { pending: 'در انتظار', running: 'در حال اجرا', done: 'تمام شد', error: 'خطا', stopped: 'متوقف', budget: 'سقف هزینه', 'needs-attention': 'نیاز به بررسی', unverified: 'تست‌نشده' };
-const QMODE = { team: 'تیمی', smart: 'هوشمند', audit: 'بازرسی و رفع', plan: 'طراحی', claude: 'فقط سازنده', codex: 'فقط تستر' };
+const QMODE = { team: 'تیمی', smart: 'هوشمند', split: 'تقسیم بین هوش‌ها', audit: 'بازرسی و رفع', plan: 'طراحی', claude: 'فقط سازنده', codex: 'فقط تستر' };
 function queueListHtml() {
   const jobs = [...(S.queueJobs || [])].sort((a, b) => (a.startAt - b.startAt));
   if (!jobs.length) return '<div class="help empty-note">صف خالی است.</div>';

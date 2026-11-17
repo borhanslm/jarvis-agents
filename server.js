@@ -69,6 +69,14 @@ orch.authMethod = claudeAuthMethod;
 const { Providers, PRESETS } = require('./lib/providers');
 const providers = new Providers(DATA, setup.secrets);
 orch.resolveProvider = spec => providers.resolve(spec);
+// who can take a part of a split job: Claude Code, Codex and the connected coding providers
+orch.splitEngines = () => {
+  const { which } = require('./lib/agents'), out = [];
+  if (which('claude').length) out.push({ id: 'claude-opus-5-5', label: 'Claude Code · Opus', note: 'strongest: architecture, tricky logic, big refactors' }, { id: 'claude-sonnet-5-5', label: 'Claude Code · Sonnet', note: 'fast, good for normal features and UI' });
+  if (which('codex').length) out.push({ id: 'codex', label: 'Codex', note: 'good at backend, algorithms, tests and careful fixes' });
+  for (const p of providers.view()) if (p.hasKey && (p.kind === 'anthropic' || p.kind === 'openai')) for (const m of (p.models || []).slice(0, 2)) out.push({ id: `p:${p.id}:${m}`, label: `${p.name} · ${m}`, note: 'connected model' });
+  return out.slice(0, 10);
+};
 
 // ---- connectors (MCP servers) and plugins (Claude Code plugin format) ----
 const { Connectors, CATALOG: CONNECTOR_CATALOG } = require('./lib/connectors');
@@ -175,7 +183,7 @@ async function runTeam({ projectId, task, mode, signal }) {
   const proj = store.project(String(projectId || '')) || store.projects()[0];
   if (!proj) throw new Error('پروژه‌ای برای تیم ایجنت‌ها نیست');
   const text = String(task || '').trim(); if (!text) throw new Error('کار مشخص نشده');
-  const m = ['team', 'smart', 'audit', 'plan'].includes(mode) ? mode : 'team';
+  const m = ['team', 'smart', 'split', 'audit', 'plan'].includes(mode) ? mode : 'team';
   const chat = store.newChat(proj.id, ('⚙ ' + text).replace(/\s+/g, ' ').slice(0, 48));
   if (needsClaudeAccount(chat, m) && !(await claudeReady())) { store.deleteChat(chat.id); throw new Error('Claude هنوز وصل نیست'); }
   broadcast({ type: 'chat', chat: store.chatSummary(chat) });
@@ -502,7 +510,7 @@ async function voiceAct(a) {
     if (!proj) return { ok: false, error: 'پروژه پیدا نشد: ' + (p.project || '') };
     const text = String(p.task || '').trim();
     if (!text) return { ok: false, error: 'کار مشخص نشد' };
-    const mode = ['team', 'smart', 'audit', 'plan'].includes(p.mode) ? p.mode : 'team';
+    const mode = ['team', 'smart', 'split', 'audit', 'plan'].includes(p.mode) ? p.mode : 'team';
     const chat = store.newChat(proj.id, text.replace(/\s+/g, ' ').slice(0, 48));
     if (needsClaudeAccount(chat, mode) && !(await claudeReady())) { store.deleteChat(chat.id); return { ok: false, error: 'Claude هنوز وصل نیست' }; }
     broadcast({ type: 'chat', chat: store.chatSummary(chat) });
@@ -1509,7 +1517,7 @@ async function api(req, res, url) {
       const proj = store.project(chat.projectId);
       if (!proj) return send(res, 400, { error: 'پروژه‌ی این چت حذف شده' });
       if (chat.messages.length === 0 && chat.title === 'چت جدید') chat.title = text.replace(/\s+/g, ' ').slice(0, 48);
-      const mode = ['team', 'smart', 'audit', 'plan', 'claude', 'codex', 'compact', 'memory'].includes(body.mode) ? body.mode : 'team';
+      const mode = ['team', 'smart', 'split', 'audit', 'plan', 'claude', 'codex', 'compact', 'memory'].includes(body.mode) ? body.mode : 'team';
       if (body.models) store.setChatModels(chat, body.models);
       // Every mode except "codex only" needs Claude; say so up front instead of failing mid-run.
       if (needsClaudeAccount(chat, mode) && !(await claudeReady())) {
