@@ -1,16 +1,17 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { runTask, sendKeys, parseMove, toScreen } = require('../lib/pc-agent');
+const { runTask, keyCodes, risky, parseMove, toScreen } = require('../lib/pc-agent');
 
 test('pc agent: keys, JSON moves, coordinates', () => {
-  assert.strictEqual(sendKeys('enter'), '{ENTER}');
-  assert.strictEqual(sendKeys('ctrl+l'), '^l');
-  assert.strictEqual(sendKeys('Ctrl+Shift+T'), '^+t');
-  assert.strictEqual(sendKeys('alt+f4'), '%{F4}');
-  assert.strictEqual(sendKeys('+'), '{+}');
-  assert.throws(() => sendKeys('win+r'), /ویندوز/);
-  assert.throws(() => sendKeys('ctrl+banana'), /نامعتبر/);
+  assert.deepStrictEqual(keyCodes('enter'), [0x0D]);
+  assert.deepStrictEqual(keyCodes('ctrl+l'), [0x11, 0x4C]);
+  assert.deepStrictEqual(keyCodes('T+Ctrl+Shift'), [0x11, 0x10, 0x54], 'modifiers first');
+  assert.deepStrictEqual(keyCodes('alt+f4'), [0x12, 0x73]);
+  assert.deepStrictEqual(keyCodes('ctrl++'), [0x11, 0xBB]);
+  assert.ok(risky(keyCodes('alt+f4')) && risky(keyCodes('ctrl+w')) && risky(keyCodes('delete')) && !risky(keyCodes('ctrl+n')));
+  assert.throws(() => keyCodes('win+r'), /ویندوز/);
+  assert.throws(() => keyCodes('ctrl+banana'), /نامعتبر/);
   assert.deepStrictEqual(parseMove('```json\n{"thought":"x","action":{"type":"done","say":"ok"}}\n```').action, { type: 'done', say: 'ok' });
   assert.strictEqual(parseMove('no json'), null);
   assert.deepStrictEqual(toScreen({ left: 1920, top: 0, scale: 0.5 }, 100, 50), [2120, 100]);
