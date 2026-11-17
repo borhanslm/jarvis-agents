@@ -197,3 +197,14 @@ button.bell-item:hover, button.bell-item:focus-visible { background: var(--color
 .kb-files li.bad span { opacity: .6; }
 .tk-kb { white-space: nowrap; font-size: 13px; }
 .tk-src { margin-top: 6px; font-size: 12px; }
+
+/* PR review */
+.pr-grid { display: grid; grid-template-columns: minmax(260px, 380px) minmax(0, 1fr); gap: 12px; min-height: 460px; }
+.pr-body { display: grid; gap: 10px; align-content: start; }
+.pr-body textarea { width: 100%; font-family: var(--font-mono, monospace); font-size: 13px; }
+.pr-verdict { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+.pr-issues { list-style: none; padding: 0; display: grid; gap: 8px; }
+.pr-issues li { padding: 8px 10px; border-inline-start: 3px solid var(--color-border-subtle); background: var(--color-surface-2); border-radius: 6px; display: grid; gap: 4px; }
+.pr-issues li.bad { border-inline-start-color: var(--color-danger, #e33); }
+.pr-issues li.warn { border-inline-start-color: var(--color-warning, #f5a524); }
+@media (max-width: 900px) { .pr-grid { grid-template-columns: 1fr; } }

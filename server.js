@@ -1229,6 +1229,42 @@ async function api(req, res, url) {
     if (!parts[1] && m === 'GET') return send(res, 200, { items: audit.list({ ...f, limit: 400 }), months: audit.months(), perms: auditMod.PERM_OF });
     if (parts[1] === 'export' && m === 'GET') return send(res, 200, { csv: audit.csv(f) });
   }
+  // pull requests on GitHub: list, review with any model, post only after the user confirms
+  if (parts[0] === 'prs') {
+    try {
+      const prs = require('./lib/prs');
+      const projOf = async id => { const p = store.project(String(id || '')); if (!p) throw new Error('پروژه پیدا نشد'); const repo = await prs.repoOf(p.path); if (!repo) throw new Error('این پروژه به GitHub وصل نیست (remote به نام origin ندارد)'); return { p, repo }; };
+      if (parts[1] === 'projects' && m === 'GET') return send(res, 200, { projects: (await Promise.all(store.projects().map(async p => ({ id: p.id, name: p.name, repo: await prs.repoOf(p.path) })))).filter(x => x.repo) });
+      if (!parts[1] && m === 'GET') { const { repo } = await projOf(url.searchParams.get('project')); return send(res, 200, { repo, list: await prs.list(repo) }); }
+      if (parts[1] === 'review' && m === 'POST') {
+        const { repo } = await projOf(body.project);
+        const d = await prs.detail(repo, body.number);
+        const st = store.settings(), spec = String(body.model || '') || st.reviewerModel || st.builderModel || 'claude-sonnet-5-5';
+        const r = await chatLLM({ spec, system: prs.SYSTEM, messages: [{ role: 'user', content: prs.reviewPrompt(d, body.lang) }], maxTokens: 6000, temperature: 0.2, json: true, signal: AbortSignal.timeout(400000) });
+        const review = prs.parseReview(r.text);
+        audit.log('panel', 'pr_review', { repo, pr: d.number, model: spec, verdict: review.verdict });
+        return send(res, 200, { pr: { number: d.number, title: d.title, url: d.url, author: d.author, files: d.files, additions: d.additions, deletions: d.deletions, head: d.headRefName, base: d.baseRefName, diffChars: d.diff.length }, review, model: spec, markdown: prs.toMarkdown(review, spec) });
+      }
+      if (parts[1] === 'post' && m === 'POST') {
+        if (body.confirmed !== true) throw new Error('ارسال به GitHub باید تأیید شود');
+        const { repo } = await projOf(body.project);
+        await prs.post(repo, body.number, { event: body.event, body: body.body });
+        audit.log('panel', 'pr_post', { repo, pr: body.number, event: body.event });
+        return send(res, 200, { ok: true });
+      }
+      // fix the found issues with the coding team, on the PR's branch
+      if (parts[1] === 'fix' && m === 'POST') {
+        if (body.confirmed !== true) throw new Error('باید تأیید شود');
+        const { p, repo } = await projOf(body.project);
+        await prs.gh(['pr', 'checkout', String(parseInt(body.number, 10)), '--repo', repo], { timeout: 120000 }).catch(e => { throw new Error('رفتن به شاخه‌ی PR نشد (تغییرات ذخیره‌نشده دارید؟): ' + e.message); });
+        const task = `Fix these review findings in pull request #${parseInt(body.number, 10)} (you are on its branch). Then run the tests.
+
+${String(body.issues || '').slice(0, 12000)}`;
+        const r = await voiceAct({ type: 'run_team', params: { project: p.name, task, mode: 'team' } }, 'panel');
+        return send(res, r && r.ok ? 200 : 400, r || { error: 'شروع نشد' });
+      }
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
   if (parts[0] === 'kb') {
     try {
       if (!parts[1] && m === 'GET') return send(res, 200, kb.view());
