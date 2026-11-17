@@ -43,6 +43,9 @@ async function render() {
       ${card('C', 'Claude', claude && claude.ok ? (st.claudeAuth === 'api-key' ? 'با کلید API' : 'با ورود Claude Code') : 'وصل نیست', claude && claude.ok,
         modelRows(models.filter(m => m.group === 'Claude')), `<button type="button" class="btn btn-sm" data-setup="1">${ic('plug', 'sm')}اتصال حساب‌ها</button>`)}
       ${card('CX', 'Codex', codex && codex.ok ? 'نصب است · برای تیم کدنویسی' : 'نصب نیست', codex && codex.ok, `<p class="help">Codex CLI برای سازنده/تستر تیم کدنویسی استفاده می‌شود (چت ساده از آن استفاده نمی‌کند).</p>`, `<button type="button" class="btn btn-sm" data-setup="1">${ic('plug', 'sm')}اتصال حساب‌ها</button>`)}
+      ${(() => { const gm = models.filter(m => m.spec === 'agy'); return card('G', 'Gemini رایگان (حساب Google)', gm.length ? 'Antigravity CLI نصب است · بدون کلید API' : 'Antigravity CLI نصب نیست', gm.length > 0,
+        (gm.length ? modelRows(gm) : '') + `<p class="help">Gemini رایگان با حساب شخصی Google، از راه ابزار رسمی Google به نام Antigravity CLI (پلن رایگان با سهمیه‌ی هفتگی). نیازی به کلید API نیست. Google در ایران فقط با VPN کار می‌کند.</p>`,
+        `<button type="button" class="btn btn-sm" data-agy="install">${ic('download', 'sm')}${gm.length ? 'نصب دوباره' : 'نصب Antigravity CLI'}</button><button type="button" class="btn btn-sm ${gm.length ? 'btn-primary' : ''}" data-agy="login">${ic('log-in', 'sm')}ورود با Google</button>`); })()}
       ${(() => { const km = models.filter(m => m.spec === 'kimi'); return card('K', 'Kimi (حساب شما)', km.length ? 'با ورود حساب Kimi · بدون کلید API' : 'Kimi Code نصب نیست', km.length > 0,
         km.length ? modelRows(km) + `<p class="help">با حساب Kimi خودتان و ابزار رسمی Kimi Code. اگر حساب شما سهمیه یا اشتراک لازم داشته باشد، خود Kimi می‌گوید.</p>`
           : `<p class="help">Kimi را بدون کلید API و با حساب خودتان به کار ببرید (مثل ChatGPT با Codex). نصب با اسکریپت رسمی Kimi انجام می‌شود و به <a href="https://gitforwindows.org" target="_blank" rel="noopener" dir="ltr">Git for Windows</a> نیاز دارد.</p>`,
@@ -72,9 +75,20 @@ function testHtml(r) {
 
 document.addEventListener('click', async e => {
   if (!el || !el.contains(e.target)) return;
-  const t = e.target.closest('[data-test],[data-edit],[data-del],[data-add],[data-setup],[data-pull],[data-olstart],[data-kimi]');
+  const t = e.target.closest('[data-test],[data-edit],[data-del],[data-add],[data-setup],[data-pull],[data-olstart],[data-kimi],[data-agy]');
   if (!t) return;
   try {
+    if (t.dataset.agy === 'install') {
+      await api('/agy/install', { body: {} }); window.toast('پنجره‌ی نصب Antigravity CLI باز شد؛ بعد از پایان، «ورود با Google» را بزنید.');
+      let n = 0; const iv = setInterval(async () => { n++; const s = await api('/agy/status').catch(() => ({})); if (s.installed || n > 40) { clearInterval(iv); if (s.installed) { window.toast('Antigravity CLI نصب شد'); render(); } } }, 6000);
+      return;
+    }
+    if (t.dataset.agy === 'login') {
+      t.disabled = true; window.toast('در حال بررسی ورود Google…');
+      try { const r = await api('/agy/login', { body: {} }); window.toast(r.already ? 'وارد هستید و Gemini رایگان کار می‌کند.' : r.error ? r.error : 'پنجره باز شد: «Google OAuth» را انتخاب کنید و در مرورگر وارد شوید؛ بعد در همان پنجره /exit بنویسید.', !!r.error); }
+      finally { t.disabled = false; }
+      return;
+    }
     if (t.dataset.kimi === 'install') {
       const r = await api('/kimi/install', { body: {} });
       window.toast(r.gitBash ? 'پنجره‌ی نصب Kimi Code باز شد؛ بعد از پایان، «ورود به Kimi» را بزنید.' : 'اول Git for Windows را نصب کنید (لینکش در همین کارت است)، بعد دوباره «نصب Kimi Code».', !r.gitBash);

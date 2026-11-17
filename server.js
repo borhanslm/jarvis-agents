@@ -159,6 +159,7 @@ async function chatModels() {
   }
   // ChatGPT with the user's own ChatGPT sign-in, through the Codex CLI
   // Kimi with the user's Kimi sign-in, through the Kimi Code CLI (no API key)
+  if (require('./lib/agy').agyCli()) out.push({ spec: 'agy', name: 'Gemini 3.8 Flash (رایگان)', group: 'Gemini (حساب Google)', note: 'بدون کلید API', ok: true, local: false });
   if (require('./lib/kimi').kimiCli()) out.push({ spec: 'kimi', name: 'Kimi', group: 'Kimi (حساب شما)', note: 'بدون کلید API', ok: true, local: false });
   if (agents.CLIS.codex) for (const m of codexModels()) out.push({ spec: 'chatgpt:' + m.slug, name: m.name, group: 'ChatGPT (حساب شما)', note: m.note, ok: true, local: false });
   for (const a of store.subagents().filter(x => x.stage === 'assistant' && x.enabled)) out.push({ spec: 'agent:' + a.id, name: a.name, group: 'ایجنت‌های من', note: a.description.slice(0, 40), ok: true, local: false, agent: true });
@@ -888,6 +889,20 @@ async function api(req, res, url) {
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
   // ---- plain chat (any model) and the model list for it ----
+  // Gemini free (Antigravity CLI): install with Google's script; sign in by running `agy` once (it opens the browser)
+  if (parts[0] === 'agy') {
+    const agy = require('./lib/agy'), { openTerminal } = require('./lib/setup');
+    if (parts[1] === 'status' && m === 'GET') return send(res, 200, { installed: !!agy.agyCli(true) });
+    if (parts[1] === 'install' && m === 'POST') { const ok = openTerminal(`Write-Host "Installing Google Antigravity CLI (official script from antigravity.google)..."; ${agy.INSTALL_WIN}; Write-Host ""; Write-Host "Done. Now press Sign in with Google in JARVIS. You can close this window."`); return send(res, 200, { ok }); }
+    if (parts[1] === 'login' && m === 'POST') {
+      const a = agy.agyCli(true); if (!a) return send(res, 400, { error: 'اول Antigravity CLI را نصب کنید' });
+      // already signed in? one tiny headless request tells
+      try { await agy.chat({ messages: [{ role: 'user', content: 'Reply with: ok' }], timeoutMs: 60000 }); return send(res, 200, { ok: true, already: true }); }
+      catch (e) { if (!e.needLogin) return send(res, 200, { ok: false, error: e.message }); }
+      const ok = openTerminal(`Write-Host "Sign in with your Google account: choose Google OAuth when asked; the browser opens. When you see the agy prompt, type /exit."; & '${a.cmd.replace(/'/g, "''")}'`);
+      return send(res, 200, { ok });
+    }
+  }
   // Kimi Code: install with the official script and sign in with the Kimi account (in a visible terminal; the user does it)
   if (parts[0] === 'kimi') {
     const kimi = require('./lib/kimi'), { openTerminal } = require('./lib/setup');
