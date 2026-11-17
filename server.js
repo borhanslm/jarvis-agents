@@ -312,6 +312,8 @@ function sellerView() {
     totals: { count: sales.length, year: sales.filter(x => x.issuedAt > year).length, amount: sales.reduce((t, x) => t + (+x.amount || 0), 0) } };
 }
 const { Talks } = require('./lib/talks');
+// Arena: models side by side, and debates between them (lib/arena.js)
+const arena = new (require('./lib/arena').Arena)(DATA, { chat: o => chatLLM(o), onEvent: ev => broadcast(ev) });
 const talks = new Talks(DATA, { chat: chatLLM, onEvent: ev => broadcast(ev), pcAllowed: () => store.settings().pcControl !== false && process.platform === 'win32',
   // a chat model asked to act on the computer
   act: async a => {
@@ -1174,6 +1176,15 @@ async function api(req, res, url) {
         const files = await xs.downloadSkill(repo, branch, dir);
         return send(res, 200, require('./lib/skill-tools').stageFiles(files, `https://github.com/${repo}/tree/${branch}/${dir}`.replace(/\/$/, '')));
       }
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
+  if (parts[0] === 'arena') {
+    try {
+      if (!parts[1] && m === 'GET') return send(res, 200, arena.view());
+      if (parts[1] === 'compare' && m === 'POST') { const r = arena.compare(body.prompt, body.models); r.done.catch(() => {}); return send(res, 200, { id: r.id }); }
+      if (parts[1] === 'debate' && m === 'POST') { const r = arena.debate(body.question, body.models, { rounds: body.rounds, judge: body.judge }); r.done.catch(() => {}); return send(res, 200, { id: r.id }); }
+      if (parts[1] === 'vote' && m === 'POST') return send(res, 200, arena.vote(String(body.id || ''), String(body.spec || '')));
+      if (parts[1] === 'stop' && m === 'POST') { arena.stop(String(body.id || '')); return send(res, 200, { ok: true }); }
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
   if (parts[0] === 'pc') {
