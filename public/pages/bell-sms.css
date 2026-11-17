@@ -83,3 +83,6 @@ button.bell-item:hover, button.bell-item:focus-visible { background: var(--color
 }
 .jvs-lex-add { margin-top: 8px; flex-wrap: wrap; }
 .jvs-lex-add input { flex: 1 1 140px; min-width: 0; }
+.jvs-mem-h { display: flex; align-items: center; gap: 6px; margin: 14px 0 6px; font-size: 13px; color: var(--color-fg-muted); }
+.jvs-mem-t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.jvs-lex-add select { min-height: 36px; }

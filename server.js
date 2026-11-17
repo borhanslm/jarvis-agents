@@ -349,6 +349,7 @@ const voiceContext = async (said = '') => {
     tasks: tasks.today().slice(0, 25),
     upcoming: (() => { const end = new Date(); end.setHours(23, 59, 59, 999); const from = end.getTime(), to = from + 7 * 864e5; return tasks.all().filter(t => !t.done && t.due && t.due > from && t.due <= to).sort((a, b) => a.due - b.due).slice(0, 25); })(),
     admin: clubAdmin() && !!(club.url() && club.token()),
+    memories: memory.recall(said).map(m => ({ kind: m.kind, text: m.text })),
     ...(ASKS_MESSAGES.test(said) ? {
       notices: notices.list.filter(n => !n.read).slice(-12).reverse().map(n => ({ kind: n.kind, title: n.title.replace(/[⁨⁩]/g, ''), body: n.body, ago: agoFa(n.at) })),
       phoneLinked: phonePaired(),
@@ -362,6 +363,18 @@ const voiceContext = async (said = '') => {
 async function freshPurchases() {
   if (Date.now() - pendingPurchases.at > 60000) { try { const r = await club.call('GET', '/api/admin/purchases?status=pending'); pendingPurchases = { list: (r && r.purchases) || [], at: Date.now() }; } catch {} }
   return pendingPurchases.list.slice(0, 15).map(p => ({ id: p.id, name: p.userName, email: p.userEmail, amount: p.amount, ref: p.ref, card4: p.card4, ago: agoFa(p.created) }));
+}
+// JARVIS's long-term memory about the user (data/memory.json) and learning mode
+const memoryMod = require('./lib/memory');
+const memory = new memoryMod.Memory(DATA);
+async function learnFrom(said, reply, spec) {
+  const s = store.settings();
+  if (s.memoryLearn === false || !spec || String(said).length < 12 || memoryMod.SENSITIVE.test(said)) return;
+  try {
+    const r = await chatLLM({ spec, system: memoryMod.EXTRACT_SYSTEM, messages: [{ role: 'user', content: memoryMod.extractPrompt(said, reply, memory.all().slice(0, 40).map(m => m.text)) }], maxTokens: 300, temperature: 0, json: true, signal: AbortSignal.timeout(60000) });
+    const added = memoryMod.parseExtract(r.text).filter(x => !memoryMod.SENSITIVE.test(x.text)).map(x => memory.add({ ...x, source: 'learned' })).filter(m => m && !m.updated);
+    if (added.length) broadcast({ type: 'memoryLearned', items: added.map(m => ({ id: m.id, text: m.text, kind: m.kind })) });
+  } catch (e) { console.error('learn', e.message); }
 }
 // what JARVIS learned about how it mishears the user (shared by voice and the Telegram assistant)
 const { Lexicon } = require('./lib/voice/lexicon');
@@ -532,6 +545,8 @@ async function voiceAct(a) {
     try { return { ok: true, pc: await require('./lib/pc').run(a.type, p) }; } catch (e) { return { ok: false, error: e.message }; }
   }
   if (a.type === 'mark_read') { notices.read('all'); return { ok: true }; }
+  if (a.type === 'remember') { const m = memory.add({ text: p.text, kind: p.kind, source: 'user' }); return m ? { ok: true, memory: { id: m.id, text: m.text, kind: m.kind } } : { ok: false, error: 'چیزی برای به خاطر سپردن نبود' }; }
+  if (a.type === 'forget') { const gone = memory.forget(p.what); return { ok: true, forgot: gone.length }; }
   if (a.type === 'approve_purchase' || a.type === 'reject_purchase') {
     if (!clubAdmin() || !club.token()) return { ok: false, error: 'فقط مدیر باشگاه می‌تواند خریدها را تأیید کند' };
     try {
@@ -994,6 +1009,15 @@ async function api(req, res, url) {
   }
   // ---- plain chat (any model) and the model list for it ----
   // Gemini free (Antigravity CLI): install with Google's script; sign in by running `agy` once (it opens the browser)
+  // JARVIS's memory (see, add, change, forget — in the JARVIS settings)
+  if (parts[0] === 'memory') {
+    try {
+      if (!parts[1] && m === 'GET') return send(res, 200, { items: memory.all(), learn: store.settings().memoryLearn !== false });
+      if (!parts[1] && m === 'POST') { const x = memory.add({ text: body.text, kind: body.kind, source: 'user' }); if (!x) throw new Error('متن کوتاه است'); return send(res, 200, { items: memory.all() }); }
+      if (parts[1] && m === 'POST') { if (!memory.update(parts[1], body.text)) throw new Error('پیدا نشد'); return send(res, 200, { items: memory.all() }); }
+      if (parts[1] && m === 'DELETE') { memory.remove(parts[1]); return send(res, 200, { items: memory.all() }); }
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
   // the bell
   if (parts[0] === 'notices') {
     if (!parts[1] && m === 'GET') return send(res, 200, { notices: notices.recent(60), unread: notices.unread() });
@@ -1310,6 +1334,7 @@ async function api(req, res, url) {
         // a question that needs a yes: show it on the phone too, so it can be answered there
         if (r.confirm && !body.phone) broadcast({ type: 'confirmRequest', say: r.say, action: r.action, at: Date.now() });
         voiceLog.push({ ts: Date.now(), user: text, say: r.say, action: r.action, confirm: r.confirm, result });
+        if (!r.guess && !(r.action && ['remember', 'forget'].includes(r.action.type))) learnFrom(text, r.say || '', spec);
         if (voiceLog.length > 200) voiceLog.splice(0, voiceLog.length - 200);
         return send(res, 200, { ...r, result });
       }

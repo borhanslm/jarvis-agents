@@ -148,7 +148,7 @@ const KEYS = [
   ['azure', 'Azure Speech', 'https://portal.azure.com/#create/Microsoft.CognitiveServicesSpeechServices', 'صداهای فارسی «دلارا» و «فرید» و شنیدن فارسی؛ سهمیه‌ی رایگان ماهانه. منطقه (Region) هم لازم است، مثل westeurope.'],
   ['deepgram', 'Deepgram', 'https://console.deepgram.com/', 'فقط شنیدن؛ برای انگلیسی عالی، فارسی محدود.'],
 ];
-const TABS = [['general', 'sliders-horizontal', 'عمومی'], ['services', 'mic', 'سرویس‌های صدا'], ['offline', 'download', 'اجزای آفلاین']];
+const TABS = [['general', 'sliders-horizontal', 'عمومی'], ['memory', 'brain', 'حافظه'], ['services', 'mic', 'سرویس‌های صدا'], ['offline', 'download', 'اجزای آفلاین']];
 const opts = (list, cur) => list.map(([k, l]) => `<option value="${esc(k)}" ${k === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
 
 async function openSettings(tab) {
@@ -163,7 +163,7 @@ async function openSettings(tab) {
   box.querySelectorAll('[data-t]').forEach(b => b.onclick = () => openSettings(b.dataset.t));
   document.addEventListener('keydown', escClose);
   try { [P.vs, P.eng] = await Promise.all([api('/voice/status'), api('/voice/engines')]); } catch (e) { $('#jvsBody', box).innerHTML = `<p class="bad">${esc(e.message)}</p>`; return; }
-  ({ general: tabGeneral, services: tabServices, offline: tabOffline })[P.tab]($('#jvsBody', box));
+  ({ general: tabGeneral, memory: tabMemory, services: tabServices, offline: tabOffline })[P.tab]($('#jvsBody', box));
 }
 function closeSettings() { const b = P.el && $('#jvSet', P.el); if (b) { b.hidden = true; b.innerHTML = ''; } document.removeEventListener('keydown', escClose); stopMeter(); }
 const escClose = e => { if (e.key === 'Escape') closeSettings(); };
@@ -196,6 +196,7 @@ async function tabGeneral(el) {
       <label class="check"><input type="checkbox" id="gWake" ${s.voiceWake !== false ? 'checked' : ''}> با گفتن «هی جارویس» بیدار شود</label>
       <div class="field"><label for="gThr">حساسیت (${fa(Math.round((+s.voiceWakeThreshold || 0.5) * 100))}٪ — کمتر = حساس‌تر)</label><input id="gThr" type="range" min="0.2" max="0.9" step="0.05" value="${+s.voiceWakeThreshold || 0.5}"></div>
       <label class="check"><input type="checkbox" id="gSpeak" ${s.voiceSpeak !== false ? 'checked' : ''}> جواب‌ها را بلند بخواند</label>
+      <label class="check"><input type="checkbox" id="gYes" ${s.voiceSayYes !== false ? 'checked' : ''}> وقتی صدایش می‌زنید بگوید «بله؟»</label>
       <label class="check"><input type="checkbox" id="gAnnounce" ${s.voiceAnnounce !== false ? 'checked' : ''}> خبرهای تازه را بلند بگوید (پیامک، درخواست خرید، پایان کار ایجنت‌ها)</label>
       <div class="field"><label for="gLang">زبان گفتار</label><select id="gLang">${opts([['auto', 'خودکار فارسی/انگلیسی'], ['fa', 'فقط فارسی (سریع‌تر)'], ['en', 'فقط انگلیسی (سریع‌تر)']], s.voiceLang || 'auto')}</select></div></section>
     <section class="jvs-sec"><h3>${ic('graduation-cap', 'sm')}کلمه‌هایی که یاد گرفته</h3>
@@ -214,11 +215,35 @@ async function tabGeneral(el) {
   $('#gMic', el).onchange = () => startMeter($('#gMic', el).value, $('#gBar', el));
   startMeter(micOk ? s.voiceMicId : '', $('#gBar', el));
   $('#gSave', el).onclick = async () => {
-    const body = { voiceMicId: $('#gMic', el).value, voiceWake: $('#gWake', el).checked, voiceWakeThreshold: +$('#gThr', el).value, voiceSpeak: $('#gSpeak', el).checked, voiceAnnounce: $('#gAnnounce', el).checked, voiceLang: $('#gLang', el).value, voiceMode: $('#gMode', el).value, voiceModel: $('#gModel', el).value, voiceModelOffline: $('#gOff', el).value };
+    const body = { voiceMicId: $('#gMic', el).value, voiceWake: $('#gWake', el).checked, voiceWakeThreshold: +$('#gThr', el).value, voiceSpeak: $('#gSpeak', el).checked, voiceAnnounce: $('#gAnnounce', el).checked, voiceSayYes: $('#gYes', el).checked, voiceLang: $('#gLang', el).value, voiceMode: $('#gMode', el).value, voiceModel: $('#gModel', el).value, voiceModelOffline: $('#gOff', el).value };
     if (body.voiceMode === 'offline' && !body.voiceModelOffline) return window.toast('برای حالت آفلاین، یک «مغز آفلاین» انتخاب کنید.', true);
     const micChanged = body.voiceMicId !== (s.voiceMicId || '') || !micOk;
     try { await save(body); stopMeter(); if (micChanged) await V().reloadMic(); await V().reloadWake(); window.toast('ذخیره شد'); tabGeneral(el); } catch (x) { window.toast(x.message, true); }
   };
+}
+
+// -- memory: what JARVIS remembers about you, and learning mode
+const MEM_KIND = { person: ['users', 'آدم‌ها'], preference: ['sliders-horizontal', 'سلیقه و ترجیح‌ها'], routine: ['repeat', 'برنامه‌ها و عادت‌ها'], place: ['map-pin', 'جاها'], work: ['wrench', 'کار'], fact: ['lightbulb', 'چیزهای دیگر'] };
+async function tabMemory(el) {
+  let d; try { d = await api('/memory'); } catch (e) { el.innerHTML = `<p class="bad">${esc(e.message)}</p>`; return; }
+  const groups = Object.keys(MEM_KIND).map(k => [k, d.items.filter(m => m.kind === k)]).filter(([, l]) => l.length);
+  el.innerHTML = `
+    <section class="jvs-sec"><h3>${ic('graduation-cap', 'sm')}حالت یادگیری</h3>
+      <label class="check"><input type="checkbox" id="mLearn" ${d.learn ? 'checked' : ''}> بعد از هر گفتگو، چیزهای ماندنی را خودش یاد بگیرد (اسم‌ها، سلیقه‌ها، برنامه‌ها) و خبر بدهد</label>
+      <p class="help">${ic('lock', 'sm')} حافظه فقط روی همین کامپیوتر است. رمز، شماره‌ی کارت و کدهای تأیید هرگز به خاطر سپرده نمی‌شوند. همیشه می‌توانید بگویید «یادت باشه …» یا «فراموش کن …».</p></section>
+    <section class="jvs-sec"><h3>${ic('brain', 'sm')}چیزهایی که به خاطر دارد (${fa(d.items.length)})</h3>
+      <div class="row-gap jvs-lex-add"><input id="mText" dir="auto" placeholder="مثلاً: همسرم سارا است / قهوه‌ام بی‌شکر" aria-label="چیزی که جارویس به خاطر بسپارد"><select id="mKind" aria-label="نوع">${Object.entries(MEM_KIND).map(([k, [, l]]) => `<option value="${k}">${l}</option>`).join('')}</select><button type="button" class="btn btn-sm" id="mAdd">${ic('plus', 'sm')}به خاطر بسپار</button></div>
+      ${groups.length ? groups.map(([k, l]) => `<h4 class="jvs-mem-h">${ic(MEM_KIND[k][0], 'sm')}${MEM_KIND[k][1]}</h4><div class="jvs-list">${l.map(m => `<div class="jvs-row"><span dir="auto" class="jvs-mem-t" data-mtext="${esc(m.id)}">${esc(m.text)}</span><span class="help">${m.source === 'learned' ? 'خودش یاد گرفت' : 'شما گفتید'}</span>
+        <button type="button" class="btn btn-sm ghost" data-medit="${esc(m.id)}" aria-label="ویرایش">${ic('pencil', 'sm')}</button><button type="button" class="btn btn-sm ghost" data-mdel="${esc(m.id)}" aria-label="فراموش کردن">${ic('trash-2', 'sm')}</button></div>`).join('')}</div>`).join('')
+        : '<p class="help">هنوز چیزی به خاطر ندارد. مثلاً بگویید: «جارویس، یادت باشه اسم همسرم ساراست».</p>'}</section>`;
+  $('#mLearn', el).onchange = async () => { try { await save({ memoryLearn: $('#mLearn', el).checked }); window.toast('ذخیره شد'); } catch (x) { window.toast(x.message, true); } };
+  $('#mAdd', el).onclick = async () => { try { await api('/memory', { body: { text: $('#mText', el).value, kind: $('#mKind', el).value } }); tabMemory(el); } catch (x) { window.toast(x.message, true); } };
+  el.querySelectorAll('[data-mdel]').forEach(b => b.onclick = async () => { await api('/memory/' + b.dataset.mdel, { method: 'DELETE' }); tabMemory(el); });
+  el.querySelectorAll('[data-medit]').forEach(b => b.onclick = async () => {
+    const cur = el.querySelector(`[data-mtext="${b.dataset.medit}"]`).textContent;
+    const t = prompt('ویرایش:', cur); if (t == null || t.trim() === cur) return;
+    try { await api('/memory/' + b.dataset.medit, { body: { text: t } }); tabMemory(el); } catch (x) { window.toast(x.message, true); }
+  });
 }
 
 // -- voice services: which engine listens / speaks, voices, keys
@@ -251,7 +276,7 @@ function tabServices(el) {
       <p class="help">${ic('lock', 'sm')} کلیدها رمزنگاری‌شده روی همین کامپیوتر می‌مانند. Gemini و OpenAI از «هسته‌ی هوش مصنوعی» خوانده می‌شوند (${e.hasGemini ? 'Gemini ✓' : 'Gemini ندارد'}، ${e.hasOpenai ? 'OpenAI ✓' : 'OpenAI ندارد'}).</p></section>`;
   const val = id => $('#' + id, el).value;
   const saveSvc = () => save({ voiceStt: val('sStt'), voiceTts: val('sTts'), voiceFaVoice: val('sFa'), voiceAzureFa: val('sAzFa'), voiceAzureEn: val('sAzEn'), voiceGeminiVoice: val('sGem'), voiceApiVoice: val('sOai'), voiceElevenVoice: val('sEl').trim() });
-  $('#sSave', el).onclick = async () => { try { await saveSvc(); window.toast('ذخیره شد'); } catch (x) { window.toast(x.message, true); } };
+  $('#sSave', el).onclick = async () => { try { await saveSvc(); V().resetYes && V().resetYes(); window.toast('ذخیره شد'); } catch (x) { window.toast(x.message, true); } };
   $('#sTry', el).onclick = async () => {
     const out = $('#sTryOut', el); out.textContent = 'در حال ساختن صدا…';
     try {

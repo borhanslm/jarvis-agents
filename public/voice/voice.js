@@ -43,6 +43,7 @@ window.jarvisVoice = {
   get micFallback() { return !!V.micFallback; },
   // after the settings change: reopen the microphone / reload the wake word
   reloadMic: async () => { V.micFallback = false; if (V.stream) { stopMic(); try { await startMic(); } catch (e) { window.toast && window.toast(e.message, true); } } },
+  resetYes: () => { V.yes = {}; prepareYes(); },
   reloadWake: async () => { if (V.state === 'off') return; const st = await api('/voice/status'); V.localStt = st.stt.local; if (settings().voiceWake !== false && st.assets.wakeword.installed) await loadWakeWord(); },
 };
 const settings = () => S.settings || {};
@@ -148,9 +149,25 @@ function wake(lang) {
   if (Date.now() - V.lastWakeAt < 1500) return;
   V.lastWakeAt = Date.now();
   if (V.ww) V.ww.reset();
-  beep(880, 0.08);
-  startRecording(false);
   setHint(lang === 'fa' ? 'بله؟ بفرمایید…' : 'Yes? I\'m listening…');
+  addLog('jarvis', lang === 'fa' ? 'بله؟' : 'Yes?');
+  // JARVIS answers «بله؟» out loud (made once, then played at once), then listens
+  const yes = settings().voiceSayYes !== false && settings().voiceSpeak !== false && V.yes && V.yes[lang === 'fa' ? 'fa' : 'en'];
+  if (!yes) { beep(880, 0.08); startRecording(false); if (settings().voiceSayYes !== false) prepareYes(); return; }
+  stopSpeaking(); setState('speaking');
+  const a = V.audio = new Audio(yes);
+  try { if (V.out && V.out.c.state === 'running') V.out.c.createMediaElementSource(a).connect(V.out.an); } catch {}
+  const go = () => { if (V.audio === a) V.audio = null; if (V.state === 'speaking') startRecording(true); };
+  a.onended = go; a.onerror = go;
+  a.play().catch(go);
+}
+// the spoken «بله؟» / "Yes?", made with the chosen voice once and kept for every wake-up
+async function prepareYes() {
+  V.yes = V.yes || {};
+  for (const [k, t] of [['fa', 'بله؟'], ['en', 'Yes?']]) {
+    if (V.yes[k]) continue;
+    try { const r = await api('/voice/tts', { body: { text: t } }); const bytes = Uint8Array.from(atob(r.audio), c => c.charCodeAt(0)); V.yes[k] = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' })); } catch {}
+  }
 }
 function startRecording(followUp) {
   stopSpeaking();
@@ -204,6 +221,7 @@ function doResult(res) {
   if (res.open) openSection(res.open);
   if (res.chatId) window.selectProject && res.projectId && window.selectProject(res.projectId), window.openChat && window.openChat(res.chatId);
   if (res.task) window.toast && window.toast('تسک: ' + res.task.title);
+  if (res.memory) window.toast && window.toast('به خاطر سپردم: ' + res.memory.text);
 }
 function openSection(o) {
   const go = {
@@ -354,6 +372,7 @@ async function start(talkNow) {
     setNet(st.online, false);
     api('/voice/warm', { body: {} }).catch(() => {}); // load the offline model in the background
     if (settings().voiceWake !== false && st.assets.wakeword.installed) await loadWakeWord();
+    setTimeout(prepareYes, 1500);
     setState('idle', V.wwError ? 'تشخیص «هی جارویس» بار نشد: ' + V.wwError : !st.assets.wakeword.installed && settings().voiceWake !== false ? 'برای «هی جارویس» مدلش را از تنظیمات صدا دانلود کنید. فعلاً Ctrl+Space.' : '');
     if (talkNow) startRecording(false);
   } catch (e) {
@@ -379,6 +398,7 @@ async function autoSetup(st) {
 window.addEventListener('jarvis:ev', e => {
   const ev = e.detail; if (!ev) return;
   if (ev.type === 'phoneResult') { addLog(ev.ok ? 'jarvis' : 'error', ev.say); if (V.state !== 'off' && ev.ok) speakText(ev.say); }
+  if (ev.type === 'memoryLearned' && window.toast) window.toast('یاد گرفتم: ' + ev.items.map(m => m.text).join('، '));
   if (ev.type === 'confirmDone' && ev.from === 'phone') { renderConfirm(null); addLog('jarvis', ev.yes ? 'روی گوشی تأیید شد.' : 'روی گوشی لغو شد.'); if (ev.result) doResult(ev.result); }
 });
 // progress of the first-run download on the dock, and switch things on as parts arrive
