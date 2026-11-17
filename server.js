@@ -331,6 +331,14 @@ const voiceContext = () => {
   };
 };
 const brain = new Brain({ chat: chatLLM, context: voiceContext });
+// phone actions asked on the computer: queued for the paired Android app (it picks them up live, or when it opens)
+const phoneTasks = [];
+function sendToPhone(action, text) {
+  const t = { id: require('crypto').randomUUID().slice(0, 12), action, text: String(text || '').slice(0, 300), at: Date.now() };
+  phoneTasks.push(t); while (phoneTasks.length > 20) phoneTasks.shift();
+  broadcast({ type: 'phoneTask', task: t });
+  return { ok: true, sentToPhone: true, id: t.id };
+}
 // ---- Telegram / Bale assistant (two-way) ----
 const { Media } = require('./lib/media');
 const media = new Media(voiceAssets);
@@ -1147,14 +1155,20 @@ async function api(req, res, url) {
         let spec = on ? (s.voiceModel || 'claude-haiku-5-5') : off;
         if (!spec) throw new Error('اینترنت در دسترس نیست و مغز آفلاین انتخاب نشده. در تنظیمات صدا یک مدل Ollama انتخاب کنید.');
         let r;
-        try { r = await brain.handle(text, { spec, phone: !!body.phone }); }
+        // asked on the phone: phone actions run there; asked on the computer with a paired phone: they are sent to it
+        const phoneMode = body.phone ? true : (s.mobileEnabled && mobile.list().length ? 'remote' : false);
+        try { r = await brain.handle(text, { spec, phone: phoneMode }); }
         catch (e) {
           // the online model could not be reached: answer with the offline one (not when the user chose "online only")
           if (!on || s.voiceMode === 'online' || !off || !net.isNetError(e)) throw e;
-          net.markOffline(); spec = off; r = await brain.handle(text, { spec, phone: !!body.phone });
+          net.markOffline(); spec = off; r = await brain.handle(text, { spec, phone: phoneMode });
         }
         r.brain = { spec, offline: spec === off };
-        const result = r.confirm ? null : await voiceAct(r.action);
+        let result;
+        if (r.action && /^phone_/.test(r.action.type) && !body.phone) result = sendToPhone(r.action, text);
+        else result = r.confirm ? null : await voiceAct(r.action);
+        // a question that needs a yes: show it on the phone too, so it can be answered there
+        if (r.confirm && !body.phone) broadcast({ type: 'confirmRequest', say: r.say, action: r.action, at: Date.now() });
         voiceLog.push({ ts: Date.now(), user: text, say: r.say, action: r.action, confirm: r.confirm, result });
         if (voiceLog.length > 200) voiceLog.splice(0, voiceLog.length - 200);
         return send(res, 200, { ...r, result });
@@ -1170,7 +1184,18 @@ async function api(req, res, url) {
         const a = brain.confirm(!!body.yes);
         const result = a ? await voiceAct(a) : null;
         voiceLog.push({ ts: Date.now(), user: body.yes ? '(تأیید)' : '(لغو)', say: '', action: a, result });
+        broadcast({ type: 'confirmDone', yes: !!body.yes, action: a, result, from: body.phone ? 'phone' : 'computer' }); // close the question everywhere
         return send(res, 200, { action: a, result });
+      }
+      // ---- jobs for the phone (asked on the computer, done by the Android app) ----
+      if (parts[1] === 'phone-tasks' && m === 'GET') return send(res, 200, { tasks: phoneTasks.filter(t => Date.now() - t.at < 15 * 6e4) });
+      if (parts[1] === 'phone-result' && m === 'POST') {
+        const t = phoneTasks.find(x => x.id === String(body.id || '')); if (!t) return send(res, 200, { ok: false });
+        phoneTasks.splice(phoneTasks.indexOf(t), 1);
+        const say = body.ok ? String(body.say || 'روی گوشی انجام شد.') : 'روی گوشی نشد: ' + String(body.error || '');
+        voiceLog.push({ ts: Date.now(), user: '(گوشی)', say, action: t.action });
+        broadcast({ type: 'phoneResult', id: t.id, ok: !!body.ok, say: say.slice(0, 600) });
+        return send(res, 200, { ok: true });
       }
       if (parts[1] === 'reset' && m === 'POST') { brain.reset(); return send(res, 200, { ok: true }); }
       // offline brain (Ollama): start it, download a model (only on the user's click)

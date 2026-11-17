@@ -370,6 +370,12 @@ async function autoSetup(st) {
   setHint('دستیار صوتی در حال آماده شدن است (دانلود اجزای آفلاین، فقط بار اول)…');
   return true;
 }
+// the phone did a job asked here (SMS, call…), or a yes/no was answered on the phone
+window.addEventListener('jarvis:ev', e => {
+  const ev = e.detail; if (!ev) return;
+  if (ev.type === 'phoneResult') { addLog(ev.ok ? 'jarvis' : 'error', ev.say); if (V.state !== 'off' && ev.ok) speakText(ev.say); }
+  if (ev.type === 'confirmDone' && ev.from === 'phone') { renderConfirm(null); addLog('jarvis', ev.yes ? 'روی گوشی تأیید شد.' : 'روی گوشی لغو شد.'); if (ev.result) doResult(ev.result); }
+});
 // progress of the first-run download on the dock, and switch things on as parts arrive
 window.addEventListener('jarvis:ev', async e => {
   const ev = e.detail;
