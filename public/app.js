@@ -39,7 +39,7 @@ function toast(msg, err) {
   setTimeout(() => d.remove(), 4500);
 }
 const fmtTime = ts => new Date(ts).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
-const STATUS = { idle: 'آماده', running: 'در حال اجرا', done: 'تمام شد', error: 'خطا', stopped: 'متوقف', 'needs-attention': 'نیاز به بررسی', unverified: 'تست‌نشده', budget: 'سقف هزینه', waiting: 'منتظر سهمیه' };
+const STATUS = { idle: 'آماده', running: 'در حال اجرا', done: 'تمام شد', error: 'خطا', stopped: 'متوقف', 'needs-attention': 'نیاز به بررسی', unverified: 'تست‌نشده', budget: 'سقف هزینه', waiting: 'منتظر سهمیه', interrupted: 'نیمه‌کاره (بسته شدن جارویس)' };
 const AGENT = { claude: 'Claude', codex: 'Codex', user: 'شما', system: 'جارویس' };
 // SVG icon from the local Lucide sprite (public/icons.svg).
 const ic = (name, cls = '') => `<svg class="ic ${cls}" aria-hidden="true"><use href="icons.svg#i-${name}"/></svg>`;
@@ -221,6 +221,13 @@ function renderStream() {
   }
   // Results of tools whose call is hidden are skipped with it.
   for (let i = from; i < msgs.length; i++) appendMessage(msgs[i], false);
+  // cut off when JARVIS closed: offer to continue
+  if (S.chat.status === 'interrupted') {
+    const b = document.createElement('div'); b.className = 'sys resume-bar';
+    b.innerHTML = `<span>${ic('triangle-alert', 'sm')} این کار با بسته شدن جارویس نیمه‌کاره ماند. ایجنت‌ها از همان‌جا ادامه می‌دهند و اول بررسی می‌کنند چه چیزهایی انجام شده.</span><button type="button" class="btn small primary">${ic('play', 'sm')}ادامه</button>`;
+    b.querySelector('button').onclick = async () => { try { await api(`/chats/${S.chat.id}/resume`, { body: {} }); toast('ادامه‌ی کار شروع شد'); } catch (e) { toast(e.message, true); } };
+    st.appendChild(b);
+  }
   if (!arguments[0]) st.scrollTop = st.scrollHeight;
 }
 const RENDER_PAGE = 300;
@@ -357,6 +364,12 @@ function buildReview(m, who) {
 
 // ---------- data flow ----------
 async function loadState() {
+  // members club: nothing loads until the person has signed in (the sign-in screen is drawn by pages/club.js)
+  for (;;) {
+    let c = null; try { c = await api('/club'); } catch {}
+    if (!c || !c.required || c.loggedIn) break;
+    await new Promise(r => setTimeout(r, 1500));
+  }
   const s = await api('/state');
   Object.assign(S, { skills: s.skills || [], defaults: s.defaults || {}, queue: s.queues || {}, subagents: s.subagents || [], projects: s.projects, settings: s.settings, agents: s.agents, versions: s.versions, clis: s.clis, codexDefaultModel: s.codexDefaultModel, claudeAuth: s.claudeAuth || null, providers: s.providers || [], providerPresets: s.providerPresets || [], modelCatalog: (s.modelCatalog && s.modelCatalog.claude) || [] });
   if (S.projectId && !S.projects.some(p => p.id === S.projectId)) S.projectId = null;
@@ -367,6 +380,7 @@ async function loadState() {
   renderProjects(); renderAgents(); renderSubagents(); renderChats(); renderProjectInfo(); renderQuick();
   const last = localStorage.getItem('jarvis.chat');
   if (last && S.chats.some(c => c.id === last && c.projectId === S.projectId)) openChat(last);
+  window.dispatchEvent(new Event('jarvis:ready'));
 }
 function selectProject(id) {
   S.projectId = id; localStorage.setItem('jarvis.project', id);
@@ -533,7 +547,10 @@ async function discoverDialog() {
 // ---------- settings (data-driven; global or per project) ----------
 const MODEL_HELP = 'یکی از مدل‌های Claude، یا «سفارشی…» برای هر شناسه‌ی دیگر؛ پیش‌فرض = مدل پیش‌فرض Claude CLI';
 const EFFORTS = [['', 'پیش‌فرض'], ['low', 'low — سریع و ارزان'], ['medium', 'medium'], ['high', 'high'], ['xhigh', 'xhigh'], ['max', 'max — کند و گران']];
-const SETTINGS_SCHEMA = [
+// Admin-only parts (selling, license keys, club setup): with a club, only its admins see them;
+// without a club (the owner's own computer, before setup) the local user is the admin.
+window.clubAdmin = () => { const c = window.JARVIS_CLUB; if (!c) return false; if (!c.required) return true; return !!(c.loggedIn && c.user && c.user.role === 'admin'); };
+const SETTINGS_SCHEMA_ALL = [
   { title: 'سرعت و هزینه', icon: 'gauge', fields: [
     { k: 'leanMode', t: 'bool', l: 'حالت سبک: بدون MCP، اسکیل‌ها و هوک‌های کاربر؛ فقط ابزارهای لازم هر نقش', h: 'در تست‌ها هزینه‌ی هر فراخوانی را نصف و سرعت را دو برابر کرد. اگر Claude به یک سرور MCP نیاز دارد خاموشش کنید.' },
     { k: 'maxRunCostUsd', t: 'number', step: 0.5, l: 'سقف هزینه‌ی Claude برای هر اجرا (دلار، ۰ = بدون سقف)', h: 'وقتی پر شود کار متوقف می‌شود. با اشتراک Pro/Max این سقف خاموش است، چون پولی پرداخت نمی‌شود (گزینه‌ی بعدی).' },
@@ -542,6 +559,7 @@ const SETTINGS_SCHEMA = [
     { k: 'codexPriceOut', t: 'number', step: 0.05, l: 'قیمت خروجی Codex برای هر ۱ میلیون توکن (دلار)' },
     { k: 'budgetOnSubscription', t: 'bool', l: 'سقف هزینه روی اشتراک Pro/Max هم اعمال شود', h: 'روی اشتراک، دلارها فقط «معادل API» هستند. روشنش کنید اگر می‌خواهید کارهای خیلی سنگین هم زودتر متوقف شوند.' },
     { k: 'onClaudeLimit', t: 'select', l: 'وقتی سهمیه‌ی Claude (Pro/Max) پر شد', o: [['wait', 'صبر کن و بعد از تمدید با Claude ادامه بده'], ['codex', 'Codex جای Claude کد بنویسد تا سهمیه تمدید شود']], h: 'در حالت Codex، نوشتن و رفع کد به Codex سپرده می‌شود و بررسی همچنان با Codex است؛ بعد از ساعت تمدید، Claude دوباره سازنده می‌شود. اگر سهمیه‌ی Codex هم پر باشد، صبر می‌کند.' },
+    { k: 'autoResume', t: 'bool', l: 'اگر جارویس وسط کار بسته شد، بعد از باز شدن خودکار ادامه بده', h: 'خاموش باشد، در همان چت دکمه‌ی «ادامه» می‌آید و یک اعلان هم می‌گیرید.' },
     { k: 'waitOnLimit', t: 'bool', l: 'وقتی سهمیه‌ی Pro پر شد، صبر کن و بعد از تمدید خودکار ادامه بده', h: 'کار متوقف نمی‌شود؛ گفتگو «منتظر سهمیه» می‌شود و سر ساعت تمدید از همان‌جا ادامه می‌دهد. «توقف» آن را لغو می‌کند.' },
     { k: 'limitMaxWaitHours', t: 'number', step: 1, l: 'حداکثر زمان انتظار برای تمدید سهمیه (ساعت)' },
     { k: 'specialistsTiming', t: 'select', l: 'زمان اجرای ساب‌ایجنت‌های تستر', o: [['after-pass', 'فقط بعد از تأیید تستر اصلی (ارزان‌تر)'], ['every-round', 'هر دور، موازی با تستر اصلی (سریع‌تر، گران‌تر)']] },
@@ -576,6 +594,9 @@ const SETTINGS_SCHEMA = [
     { k: 'testCommand', t: 'text', ltr: 1, ph: 'auto', l: 'دستور تست پروژه (auto = تشخیص خودکار، خالی = خاموش)', h: 'جارویس بعد از هر دور، تست‌های خود پروژه را اجرا می‌کند و نتیجه را به تستر می‌دهد. مثلاً auto، npm test یا python -m pytest. بهتر است در «تنظیمات پروژه» بگذارید.' },
     { k: 'testGate', t: 'bool', l: 'تا تست‌ها پاس نشده‌اند، کار تأیید نشود', h: 'اگر تست‌ها شکست بخورند، حتی اگر تستر تأیید کرده باشد، یک باگ «بحرانی» به فهرست رفع اضافه می‌شود.' },
     { k: 'testTimeoutSec', t: 'number', step: 30, l: 'حداکثر زمان اجرای تست‌ها (ثانیه)' },
+    { k: 'sandboxMode', t: 'select', l: 'سندباکس اجرای تست‌ها', o: [['off', 'خاموش — در خود پوشه‌ی پروژه'], ['copy', 'کپی جدا — روی یک کپی موقت، بدون کلیدها و توکن‌های شما'], ['docker', 'Docker — کانتینر جدا، بدون اینترنت (Docker Desktop لازم است)'], ['wsb', 'Windows Sandbox — ویندوز یک‌بارمصرف (ویندوز Pro)'], ['auto', 'خودکار — Docker اگر باشد، وگرنه کپی جدا']], h: 'تست‌ها نمی‌توانند پروژه‌ی اصلی را تغییر دهند یا پاک کنند. «کپی جدا» جلوی برنامه‌ی مخرب را نمی‌گیرد؛ برای کد ناشناس Docker یا Windows Sandbox بهتر است.' },
+    { k: 'sandboxNetwork', t: 'bool', l: 'اینترنت داخل Docker / Windows Sandbox', h: 'خاموش امن‌تر است. روشن باشد، Docker قبل از تست «npm ci» می‌زند.' },
+    { k: 'sandboxImage', t: 'text', ltr: 1, ph: 'node:22', l: 'ایمیج Docker (خالی = بر اساس پروژه)' },
   ] },
   { title: 'جریان کار تیمی', icon: 'handshake', fields: [
     { k: 'maxRounds', t: 'number', step: 1, l: 'حداکثر دورهای «تست ← رفع»' },
@@ -614,11 +635,17 @@ const SETTINGS_SCHEMA = [
     { k: 'desktopAutoUpdate', t: 'bool', global: 1, l: 'به‌روزرسانی خودکار از GitHub', h: 'نسخه‌ی تازه در پس‌زمینه دانلود می‌شود و با یک کلیک (یا با بستن کامل برنامه) نصب می‌شود.' },
     { k: 'desktopHotkey', t: 'bool', global: 1, l: 'میانبر سراسری Ctrl+Shift+J برای نمایش یا پنهان کردن جارویس' },
   ] },
+  { title: 'فروش', icon: 'wallet', admin: true, fields: [
+    { k: 'sellerMode', t: 'bool', global: 1, l: 'حالت فروشنده: بخش «فروش اپ اندروید» نشان داده شود', h: 'برای سازنده‌ی جارویس: ساخت کلید لایسنس برای خریدارهای اپ اندروید و فهرست فروش‌ها. کاربرهای عادی لازمش ندارند.' },
+  ] },
   { title: 'اعلان‌ها', icon: 'bell', fields: [
     { k: 'notify', t: 'bool', l: 'اعلان دسکتاپ وقتی کار تمام شد' },
     { k: 'speak', t: 'bool', l: 'اعلام صوتی پایان کار' },
   ] },
 ];
+// the groups this person may see (admin-only groups hidden for members)
+const SETTINGS_VISIBLE = () => SETTINGS_SCHEMA_ALL.filter(g => !g.admin || window.clubAdmin());
+Object.defineProperty(window, 'SETTINGS_SCHEMA', { get: SETTINGS_VISIBLE, configurable: true });
 
 function fieldHtml(f, v, isProject) {
   const dis = isProject && f.global ? 'disabled title="این تنظیم فقط سراسری است"' : !isProject && f.projectOnly ? 'disabled title="این تنظیم فقط در «تنظیمات پروژه» است"' : '';
@@ -636,7 +663,7 @@ function fieldHtml(f, v, isProject) {
 
 function readSettingsForm() {
   const out = {};
-  for (const sec of SETTINGS_SCHEMA) for (const f of sec.fields) {
+  for (const sec of SETTINGS_VISIBLE()) for (const f of sec.fields) {
     const el = document.querySelector(`#dlgBody [data-k="${f.k}"]`);
     if (!el || el.disabled) continue;
     if (f.t === 'bool') out[f.k] = el.checked;
@@ -664,8 +691,8 @@ async function settingsDialog(scope) {
       ${proj ? `<label><input type="radio" name="scope" value="project" ${isProject ? 'checked' : ''}><span>${ic('folder')}فقط پروژه‌ی «${esc(proj.name)}»</span></label>` : ''}
     </div>
     ${isProject ? `<div class="help scope-help">${override ? 'این پروژه تنظیمات اختصاصی دارد.' : 'این پروژه از تنظیمات سراسری پیروی می‌کند؛ با ذخیره، تنظیمات اختصاصی برایش ساخته می‌شود.'}</div>` : ''}
-    <div class="settings-tabs">${SETTINGS_SCHEMA.map((s, i) => `<button type="button" class="stab ${i === 0 ? 'on' : ''}" data-tab="${i}">${s.icon ? ic(s.icon) : ''}${s.title}</button>`).join('')}</div>
-    ${SETTINGS_SCHEMA.map((s, i) => `<section class="spane" data-pane="${i}" ${i ? 'hidden' : ''}>${s.fields.map(f => fieldHtml(f, values[f.k], isProject)).join('')}</section>`).join('')}
+    <div class="settings-tabs">${SETTINGS_VISIBLE().map((s, i) => `<button type="button" class="stab ${i === 0 ? 'on' : ''}" data-tab="${i}">${s.icon ? ic(s.icon) : ''}${s.title}</button>`).join('')}</div>
+    ${SETTINGS_VISIBLE().map((s, i) => `<section class="spane" data-pane="${i}" ${i ? 'hidden' : ''}>${s.fields.map(f => fieldHtml(f, values[f.k], isProject)).join('')}</section>`).join('')}
     ${!isProject && S.settings.requireToken && localStorage.getItem('jarvis.token') ? `<div class="help">${ic('key-round', 'sm')} لینک ورود با توکن: <code dir="ltr">${esc(location.origin)}/?token=${esc(localStorage.getItem('jarvis.token'))}</code></div>` : ''}
     <div class="dlg-actions">
       <button class="btn primary" id="sSave">ذخیره${isProject ? ' برای این پروژه' : ''}</button>
@@ -1033,14 +1060,16 @@ $('#input').onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)
 
 // ---------- sub-agents ----------
 const STAGE = { review: 'تستر موازی', builder: 'کمکِ سازنده' };
+// an agent icon is an icon name (new) or an emoji (older agents)
+function agentIcon(a, cls = 'sm') { const i = String(a.icon || 'bot'); return /^[a-z0-9-]+$/.test(i) ? ic(i, cls) : ic(iconText(i + ' x').icon || 'bot', cls); }
 function renderSubagents() {
   const ul = $('#subList');
   ul.innerHTML = S.subagents.length ? S.subagents.map(a => `<li data-sub="${esc(a.id)}" class="${a.enabled ? '' : 'off'}" title="${esc(a.description || a.prompt.slice(0, 200))}">
       <input type="checkbox" data-toggle="${esc(a.id)}" ${a.enabled ? 'checked' : ''} title="فعال/غیرفعال">
-      <span>${esc(a.icon)}</span><span class="name" dir="ltr" style="text-align:right">${esc(a.name)}</span>
+      <span>${agentIcon(a)}</span><span class="name" dir="ltr" style="text-align:right">${esc(a.name)}</span>
       ${(a.skills || []).length ? `<span class="skc" title="اسکیل‌ها">${ic('puzzle', 'sm')}${(a.skills.length).toLocaleString('fa-IR')}</span>` : ''}<span class="stage ${a.stage}" title="${a.stage === 'review' ? 'اجرا با: ' + esc(subRunnerLabel(a)) : 'داخل نشست سازنده اجرا می‌شود'}">${STAGE[a.stage]}${a.stage === 'review' ? ' · ' + esc(subRunnerShort(a)) : ''}</span></li>`).join('')
     : '<li class="empty">ساب‌ایجنتی تعریف نشده.</li>';
-  $('#mentions').innerHTML = S.subagents.map(a => `<button type="button" data-mention="${esc(a.name)}">${esc(a.icon)} @${esc(a.name)}</button>`).join('');
+  $('#mentions').innerHTML = S.subagents.filter(a => a.stage !== 'assistant').map(a => `<button type="button" data-mention="${esc(a.name)}">${agentIcon(a)} @${esc(a.name)}</button>`).join('');
 }
 function subagentDialog(a, draft) {
   const isNew = !a;
@@ -1367,9 +1396,11 @@ function modelOptions(kind, value) {
   const base = claudeModels(); // both slots can run Claude models
   const def = kind === 'claude' ? 'پیش‌فرض CLI' : `پیش‌فرض · ${prettyModel(S.codexDefaultModel) || 'CLI'}`;
   const extra = [...cm[kind], value].filter(v => v && v !== '__custom' && !base.some(([i]) => i === v));
-  const conn = (S.providers || []).flatMap(p => p.models.map(m => [`p:${p.id}:${m}`, `${p.name} · ${m}`]));
+  // every connection works in the team: coding-API ones through Claude Code / Codex, chat-only ones (Gemini, Grok, Qwen…) through JARVIS's own agent
+  const conn = (S.providers || []).flatMap(p => p.models.map(m => [`p:${p.id}:${m}`, `${p.name} · ${m}${p.kind === 'chat' ? ' (عامل جارویس)' : ''}`]));
+  const signIns = [['chatgpt', 'ChatGPT (حساب شما · Codex)'], ['kimi', 'Kimi (حساب شما)'], ['agy', 'Gemini رایگان (حساب Google)']].filter(([k]) => !conn.some(([c]) => c === k));
   const extra2 = extra.filter(v => !conn.some(([c]) => c === v));
-  return [['', def], ...base, ...conn, ...[...new Set(extra2)].map(v => [v, prettyModel(v) === v ? v : /^p:/.test(v) ? `${prettyModel(v)} (حذف‌شده)` : `${prettyModel(v)} (${v})`]), ['__custom', 'سفارشی…']];
+  return [['', def], ...base, ...conn, ...signIns, ...[...new Set(extra2)].filter(v => !signIns.some(([k]) => k === v)).map(v => [v, prettyModel(v) === v ? v : /^p:/.test(v) ? `${prettyModel(v)} (حذف‌شده)` : `${prettyModel(v)} (${v})`]), ['__custom', 'سفارشی…']];
 }
 const CLAUDE_MODELS = claudeModels;
 const CLAUDE_EFFORT = [['low', 'فکر: کم'], ['medium', 'فکر: متوسط'], ['high', 'فکر: زیاد'], ['xhigh', 'فکر: خیلی زیاد'], ['max', 'فکر: حداکثر']];
@@ -1514,6 +1545,23 @@ document.getElementById('dlgBody').addEventListener('change', e => {
   d.onWindowState(sync);
 })();
 
+// ---------- full screen (the whole app; F11 too) ----------
+(function fullscreen() {
+  const d = window.jarvisDesktop;
+  const sync = on => {
+    document.documentElement.classList.toggle('is-full', on); window.dispatchEvent(new Event('resize'));
+    document.querySelectorAll('#btnFull, #jvFull').forEach(b => { b.innerHTML = ic(on ? 'minimize-2' : 'maximize-2'); b.title = on ? 'خروج از تمام‌صفحه (F11)' : 'تمام‌صفحه (F11)'; b.setAttribute('aria-label', b.title); });
+  };
+  window.toggleFullscreen = () => {
+    if (d && d.toggleFullscreen) return d.toggleFullscreen();
+    if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => {});
+  };
+  if (d && d.onWindowState) { d.onWindowState(s => sync(s.fullscreen)); d.windowState().then(s => sync(!!s.fullscreen)).catch(() => {}); }
+  else document.addEventListener('fullscreenchange', () => sync(!!document.fullscreenElement));
+  $('#btnFull').onclick = window.toggleFullscreen;
+  document.addEventListener('keydown', e => { if (e.key === 'F11') { e.preventDefault(); window.toggleFullscreen(); } });
+})();
+
 // ---------- HUD clock ----------
 (function hudClock() {
   const t = $('#hudTime'), dEl = $('#hudDate');
@@ -1628,7 +1676,7 @@ function renderQuick() {
     + `<button type="button" class="add" data-quickedit="1" title="افزودن یا ویرایش فرمان‌های آماده">${ic(items.length ? 'pencil' : 'plus', 'sm')}${items.length ? '' : 'فرمان آماده'}</button>`;
 }
 $('#quickPrompts').onclick = e => {
-  if (e.target.closest('[data-quickedit]')) { settingsDialog('global').then(() => { const t = [...document.querySelectorAll('#dlgBody .stab')].find(b => /فرمان/.test(b.textContent)); if (t) t.click(); }); return; }
+  if (e.target.closest('[data-quickedit]')) { settingsDialog('global', 'savedPrompts'); return; }
   const b = e.target.closest('[data-quick]'); if (!b) return;
   const q = quickItems()[+b.dataset.quick]; if (!q) return;
   const el = $('#input');
@@ -1654,6 +1702,7 @@ function paletteItems() {
     { icon: 'folder-plus', label: 'افزودن پروژه', run: () => addProjectDialog() },
     { icon: 'palette', label: 'ظاهر برنامه (۱۲ مدل)', run: skinDialog },
     { icon: 'puzzle', label: 'اتصال‌دهنده‌ها و پلاگین‌ها', run: () => extDialog('connectors') },
+    { icon: 'graduation-cap', label: 'اسکیل‌ها', run: () => extDialog('skills') },
     { icon: 'clock', label: 'صف کارها (اجرای شبانه)', run: () => queueDialog() },
     { icon: 'radar', label: 'اتاق عملیات سه‌بعدی', run: () => window.openOps && openOps() },
     { icon: 'sun', label: 'تغییر تم', run: () => $('#btnTheme').click() },
@@ -1904,7 +1953,7 @@ function roleAgent(role) {
 function renderRoles() {
   const b = roleAgent('builder').name, r = roleAgent('reviewer').name;
   const sub = document.getElementById('brandSub');
-  if (sub) sub.textContent = 'تیم ایجنت‌های برنامه‌نویس';
+  if (sub) sub.textContent = 'دستیار هوشمند شخصی';
   const p = homeEl('#homeRoles');
   if (S.subagents) renderSubagents();
   const ba = roleAgent('builder'), ra = roleAgent('reviewer');
@@ -1917,7 +1966,7 @@ function providersBlock() {
   const list = S.providers || [];
   const rows = list.map(p => `<div class="prov-row">
       <span class="dot ${p.hasKey ? 'on' : 'warn'}"></span><b>${esc(p.name)}</b>
-      <span class="help">${p.kind === 'openai' ? 'OpenAI Responses · موتور Codex' : 'سازگار با Anthropic · موتور Claude Code'} · ${fa(p.models.length)} مدل${p.hasKey ? '' : ' · <span class="pi-warn">کلید ندارد</span>'}</span>
+      <span class="help">${p.kind === 'chat' ? 'فقط چت، صدا و تلگرام' : p.kind === 'openai' ? 'OpenAI Responses · موتور Codex' : 'سازگار با Anthropic · موتور Claude Code'} · ${fa(p.models.length)} مدل${p.hasKey ? '' : ' · <span class="pi-warn">کلید ندارد</span>'}</span>
       <button type="button" class="btn small ghost" data-editprov="${esc(p.id)}">${ic('pencil', 'sm')}ویرایش</button></div>`).join('');
   return `<div class="wz-item ${list.some(p => p.hasKey) ? 'ok' : ''}">
     <div class="wz-icon">${ic('globe')}</div>
@@ -1940,6 +1989,7 @@ async function providerDialog(id) {
     <div class="field"><label>نوع API</label>
       <label class="check"><input type="radio" name="pvKind" value="anthropic" ${v.kind !== 'openai' ? 'checked' : ''}> سازگار با Anthropic — با موتور Claude Code اجرا می‌شود (DeepSeek، Kimi، GLM، MiniMax)</label>
       <label class="check"><input type="radio" name="pvKind" value="openai" ${v.kind === 'openai' ? 'checked' : ''}> سازگار با OpenAI Responses — با موتور Codex اجرا می‌شود (OpenAI)</label>
+      <label class="check"><input type="radio" name="pvKind" value="chat" ${v.kind === 'chat' ? 'checked' : ''}> سازگار با OpenAI Chat — فقط برای چت، صدا و تلگرام (Gemini، Grok، OpenRouter، Groq، NVIDIA، Ollama)</label>
       <div class="help" id="pvKindHelp"></div></div>
     <div class="field"><label for="pvUrl">آدرس API (Base URL)</label><input id="pvUrl" dir="ltr" value="${esc(v.baseUrl)}" placeholder="https://api.example.com/anthropic"></div>
     <div class="field"><label for="pvKey">کلید API <a href="#" id="pvKeyLink" hidden>گرفتن کلید ↗</a></label>
@@ -1960,7 +2010,7 @@ async function providerDialog(id) {
   const preset = () => presets.find(x => x.id === (p ? p.preset : $('#pvPreset').value)) || {};
   const kind = () => (document.querySelector('input[name=pvKind]:checked') || {}).value || 'anthropic';
   const syncHelp = () => {
-    $('#pvKindHelp').textContent = kind() === 'openai'
+    $('#pvKindHelp').textContent = kind() === 'chat' ? 'برای گفتگو و دستیار. تیم کدنویسی از این نوع استفاده نمی‌کند.' : kind() === 'openai'
       ? 'فقط سرویس‌هایی که Responses API دارند. سرویس‌هایی که فقط Chat Completions دارند (مثل DeepSeek) از این راه کار نمی‌کنند؛ برای آن‌ها نوع Anthropic را انتخاب کنید.'
       : 'سرویس باید API سازگار با Anthropic (/v1/messages) داشته باشد. DeepSeek، Kimi، GLM و MiniMax چنین آدرسی دارند.';
     const pr = preset(); const l = $('#pvKeyLink');
@@ -1993,7 +2043,9 @@ async function providerDialog(id) {
     catch (e) { out(esc(e.message), true); }
   };
   $('#pvTest').onclick = async () => {
-    const f = form(); const model = String(f.models).split(/[,،\n]/)[0].trim();
+    const f = form();
+    const all = String(f.models).split(/[,،\n]/).map(x => x.trim().replace(/^models\//, '')).filter(Boolean);
+    const model = all.find(x => !/tts|embed|imagen|veo|image|aqa|whisper|audio/i.test(x)) || all[0]; // test with a chat model
     if (!model) return out('اول یک مدل بنویسید.', true);
     out(`در حال آزمایش با <code dir="ltr">${esc(model)}</code>…`);
     try {
@@ -2001,20 +2053,22 @@ async function providerDialog(id) {
       out(r.ok ? `${ic('circle-check', 'sm')} اتصال برقرار است (${fa(r.ms)} میلی‌ثانیه).` : `${ic('circle-x', 'sm')} ${esc(r.hint || '')} <span dir="ltr">${esc(r.status ? r.status + ' — ' : '')}${esc(r.error || '')}</span>`, !r.ok);
     } catch (e) { out(esc(e.message), true); }
   };
+  // opened from AI Core: go back there instead of the setup wizard
+  const pvDone = () => { const f = window.__pvReturn; window.__pvReturn = null; if (f) { $('#dlg').close(); f(); } else setupDialog(); };
   $('#pvSave').onclick = async () => {
     try {
       const r = await api('/providers', { body: form() });
       S.providers = await api('/providers');
       toast(`اتصال «${r.name}» ذخیره شد${r.hasKey ? '' : ' — کلید API را هم وارد کنید'}`);
       renderAgents(); renderModelBar();
-      setupDialog();
+      pvDone();
     } catch (e) { out(esc(e.message), true); }
   };
   if ($('#pvDel')) $('#pvDel').onclick = async () => {
     if (!confirm(`اتصال «${p.name}» و کلیدش حذف شود؟`)) return;
-    try { await api('/providers/' + p.id, { method: 'DELETE' }); S.providers = await api('/providers'); toast('حذف شد'); renderAgents(); renderModelBar(); setupDialog(); } catch (e) { toast(e.message, true); }
+    try { await api('/providers/' + p.id, { method: 'DELETE' }); S.providers = await api('/providers'); toast('حذف شد'); renderAgents(); renderModelBar(); pvDone(); } catch (e) { toast(e.message, true); }
   };
-  $('#pvBack').onclick = () => setupDialog();
+  $('#pvBack').onclick = () => pvDone();
 }
 
 // ---------- sub-agents: who runs each one ----------
@@ -2110,13 +2164,13 @@ function notifyBlock() {
   const on = !!(st.notifyPhone && st.notifyChatId);
   return `<div class="wz-item ${on ? 'ok' : ''}">
     <div class="wz-icon">${ic('bell')}</div>
-    <div class="wz-body"><h4>اعلان روی گوشی <small class="help">بله یا تلگرام</small></h4>
-      ${on ? `<span class="wz-state ok">${ic('circle-check', 'sm')}روشن · ${st.notifyPhone === 'bale' ? 'بله' : 'تلگرام'}</span>` : '<span class="help">وقتی کاری تمام شد، به گوشی‌تان پیام می‌دهد.</span>'}
+    <div class="wz-body"><h4>دستیار تلگرام / بله <small class="help">اعلان + گفتگو با جارویس از گوشی</small></h4>
+      ${on ? `<span class="wz-state ok">${ic('circle-check', 'sm')}روشن · ${st.notifyPhone === 'bale' ? 'بله' : 'تلگرام'}${st.botEnabled ? ' · دستیار دوطرفه' : ''}</span>` : '<span class="help">وقتی کاری تمام شد، به گوشی‌تان پیام می‌دهد.</span>'}
       <div class="row-gap"><button type="button" class="btn btn-secondary btn-sm" data-notify="1">${ic('bell')}${on ? 'تنظیم' : 'راه‌اندازی'}</button></div></div></div>`;
 }
 async function notifyDialog() {
-  let cur = {}; try { cur = await api('/notify'); } catch {}
-  dialog(`<div class="dlg-scroll"><h3>${ic('bell')}اعلان روی گوشی</h3>
+  let cur = {}, bt = {}; try { [cur, bt] = await Promise.all([api('/notify'), api('/bot')]); } catch {}
+  dialog(`<div class="dlg-scroll"><h3>${ic('bell')}دستیار تلگرام / بله</h3>
     <ol class="help nt-steps">
       <li>در بله یا تلگرام به <b dir="ltr">@BotFather</b> پیام بدهید، <code>/newbot</code> را بفرستید و یک ربات بسازید. توکنی که می‌دهد را کپی کنید.</li>
       <li>ربات تازه‌تان را باز کنید و یک پیام (مثلاً «سلام») برایش بفرستید.</li>
@@ -2128,9 +2182,16 @@ async function notifyDialog() {
       <div class="row-gap"><button type="button" class="btn small" id="ntDetect">${ic('search', 'sm')}پیدا کردن خودکار</button><button type="button" class="btn small" id="ntTest">${ic('send', 'sm')}پیام آزمایشی</button></div>
       <div id="ntOut" class="help" role="status"></div></div>
     <div class="field"><label for="ntWhen">کی خبر بدهد</label><select id="ntWhen"><option value="all">پایان هر کار</option><option value="problems">فقط وقتی مشکلی بود</option></select></div>
-    <p class="help">فقط وضعیت کار (تمام شد / خطا)، اسم گفتگو و مدت زمان فرستاده می‌شود؛ هیچ کدی فرستاده نمی‌شود.</p></div>
+    <p class="help">در اعلان‌ها فقط وضعیت کار (تمام شد / خطا)، اسم گفتگو و مدت زمان فرستاده می‌شود؛ هیچ کدی فرستاده نمی‌شود.</p>
+    <h4>${ic('messages-square', 'sm')} گفتگو با جارویس از گوشی</h4>
+    <label class="check"><input type="checkbox" id="ntBot" ${bt.enabled ? 'checked' : ''}> جارویس در همین ربات به پیام‌ها و پیام‌های صوتی شما جواب بدهد (تسک، شروع کار تیمی، وضعیت ایجنت‌ها، سؤال)</label>
+    <div class="field"><label for="ntVoice">جواب صوتی</label><select id="ntVoice"><option value="auto">وقتی پیام صوتی فرستادم</option><option value="always">همیشه</option><option value="never">هرگز — فقط متن</option></select></div>
+    <div class="help" id="ntBotSt">${bt.running ? (bt.connected ? `${ic('circle-check', 'sm')} وصل است${bt.botName ? ' به <b dir="ltr">@' + esc(bt.botName) + '</b>' : ''}` : 'در حال وصل شدن…' + (bt.lastError ? ' — ' + esc(bt.lastError) : '')) : 'خاموش'}</div>
+    ${bt.ffmpeg ? '' : `<div class="va-tip">${ic('download', 'sm')} برای پیام صوتی، «FFmpeg» را از تنظیمات صدا دانلود کنید. <button type="button" class="btn small" id="ntFf">باز کردن تنظیمات صدا</button></div>`}
+    <p class="help">${ic('lock', 'sm')} فقط به همین شناسه‌ی گفتگو (شما) جواب می‌دهد؛ پیام بقیه نادیده گرفته می‌شود. کارهایی که چیزی را تغییر می‌دهند، قبل از اجرا با دکمه‌ی «بله» تأیید می‌خواهند. هیچ چیز روی اینترنت باز نمی‌شود.</p></div>
     <div class="dlg-actions"><button type="button" class="btn primary" id="ntSave">${ic('save', 'sm')}ذخیره</button><button type="button" class="btn ghost" id="ntBack">بازگشت</button></div>`);
-  $('#ntCh').value = cur.channel || ''; $('#ntWhen').value = cur.when || 'all';
+  $('#ntCh').value = cur.channel || ''; $('#ntWhen').value = cur.when || 'all'; $('#ntVoice').value = bt.voiceReply || 'auto';
+  if ($('#ntFf')) $('#ntFf').onclick = () => window.voiceDialog && window.voiceDialog();
   const out = (h, bad) => { $('#ntOut').innerHTML = h; $('#ntOut').className = 'help ' + (bad ? 'pi-bad' : ''); };
   const f = () => ({ channel: $('#ntCh').value, token: $('#ntTok').value.trim(), chatId: $('#ntChat').value.trim(), when: $('#ntWhen').value });
   $('#ntDetect').onclick = async () => {
@@ -2144,7 +2205,13 @@ async function notifyDialog() {
     try { await api('/notify/test', { body: f() }); out('پیام فرستاده شد؛ گوشی‌تان را نگاه کنید.'); } catch (e) { out(esc(e.message), true); }
   };
   $('#ntSave').onclick = async () => {
-    try { await api('/notify', { body: f() }); S.settings = await api('/settings', { body: {} }); toast('ذخیره شد'); setupDialog(); } catch (e) { out(esc(e.message), true); }
+    try {
+      await api('/notify', { body: f() });
+      await api('/bot', { body: { enabled: $('#ntBot').checked, voiceReply: $('#ntVoice').value } });
+      S.settings = await api('/settings', { body: {} });
+      toast($('#ntBot').checked ? 'ذخیره شد — حالا در ربات به جارویس پیام بدهید' : 'ذخیره شد');
+      if (window.__ntReturn) { const r = window.__ntReturn; window.__ntReturn = null; $('#dlg').close(); r(); } else setupDialog();
+    } catch (e) { out(esc(e.message), true); }
   };
   $('#ntBack').onclick = () => setupDialog();
 }

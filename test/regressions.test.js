@@ -19,7 +19,7 @@ function startServer() {
   return new Promise((resolve, reject) => {
     const data = tmp('jarvis-srv-');
     const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-      env: { ...process.env, JARVIS_PORT: '0', JARVIS_DATA: data }, stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, JARVIS_PORT: '0', JARVIS_DATA: data, JARVIS_CLUB_URL: '' }, stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '';
     const t = setTimeout(() => reject(new Error('server did not start: ' + out)), 15000);

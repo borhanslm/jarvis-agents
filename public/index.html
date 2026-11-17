@@ -8,18 +8,24 @@
 <!-- Everything is local: fonts, icons and three.js are bundled; no network requests. -->
 <script>
   // Apply the saved theme before first paint (no flash).
-  try { const k = localStorage.getItem('jarvis.skin'); if (k && /^[a-z]{2,12}$/.test(k) && k !== 'holo') document.documentElement.dataset.skin = k; } catch {}
+  try { const k = localStorage.getItem('jarvis.skin') || 'jarvis'; if (k && /^[a-z]{2,12}$/.test(k) && k !== 'holo') document.documentElement.dataset.skin = k; } catch {}
   try { let t = localStorage.getItem('jarvis.theme'); if (t === 'system') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch {}
 </script>
 <link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="holo.css">
 <link rel="stylesheet" href="ext.css">
+<link rel="stylesheet" href="cc.css">
+<link rel="stylesheet" href="pages/pages.css">
+<link rel="stylesheet" href="pages/bell-sms.css">
 <link rel="stylesheet" href="skins.css">
+<link rel="stylesheet" href="jarvis-hud.css">
+<link rel="stylesheet" href="responsive.css">
 <link rel="icon" href="logo.svg" type="image/svg+xml">
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
 </head>
 <body>
+<script src="boot.js"></script>
 <a class="skip-link" href="#stream">رفتن به محتوای اصلی</a>
 
 <header class="topbar">
@@ -33,7 +39,7 @@
     </svg>
     <div class="brand-text">
       <span class="brand-name">JARVIS</span>
-      <span class="brand-sub" id="brandSub">تیم ایجنت‌های برنامه‌نویس</span>
+      <span class="brand-sub" id="brandSub">دستیار هوشمند شخصی</span>
     </div>
   </div>
 
@@ -44,6 +50,9 @@
   <div class="top-actions">
     <button class="icon-btn" id="btnPalette" type="button" aria-label="جستجو و فرمان" title="جستجو و فرمان (Ctrl+K)">
       <svg class="ic" aria-hidden="true"><use href="icons.svg#i-search" /></svg>
+    </button>
+    <button class="icon-btn voice-btn" id="btnVoice" type="button" aria-label="دستیار صوتی" title="دستیار صوتی — «هی جارویس» یا Ctrl+Space">
+      <svg class="ic" aria-hidden="true"><use href="icons.svg#i-mic" /></svg>
     </button>
     <button class="icon-btn" id="btnOps" type="button" aria-label="اتاق عملیات" title="اتاق عملیات — ایجنت‌ها را زنده و سه‌بعدی ببینید">
       <svg class="ic" aria-hidden="true"><use href="icons.svg#i-radar" /></svg>
@@ -59,6 +68,9 @@
     </button>
     <button class="icon-btn" id="btnTheme" type="button" aria-label="تغییر تم" title="تم روشن / تیره">
       <svg class="ic" aria-hidden="true"><use href="icons.svg#i-sun" /></svg>
+    </button>
+    <button class="icon-btn" id="btnFull" type="button" aria-label="تمام‌صفحه (F11)" title="تمام‌صفحه (F11)">
+      <svg class="ic" aria-hidden="true"><use href="icons.svg#i-maximize-2" /></svg>
     </button>
     <button class="btn btn-ghost" id="btnSettings" type="button">
       <svg class="ic" aria-hidden="true"><use href="icons.svg#i-settings" /></svg><span>تنظیمات</span>
@@ -232,6 +244,7 @@
           <div class="modes" id="modes" role="radiogroup" aria-label="حالت کار">
             <label title="سازنده می‌نویسد، تستر تست می‌کند، سازنده رفع می‌کند"><input type="radio" name="mode" value="team" checked><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-handshake" /></svg>تیمی</span></label>
             <label title="جارویس کار را به چند بخش تقسیم می‌کند و هر بخش را با مدل مناسب (و ارزان‌تر) انجام می‌دهد، بعد تستر کل کار را بررسی می‌کند"><input type="radio" name="mode" value="smart"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-sparkles" /></svg>هوشمند</span></label>
+            <label title="کار بزرگ بین چند هوش مصنوعی (Claude Code، Codex و مدل‌های وصل‌شده) تقسیم می‌شود؛ بخش‌ها هم‌زمان، هر کدام در یک نسخه‌ی جدا از پروژه انجام می‌شوند، بعد کنار هم می‌آیند و تستر همه را بررسی می‌کند"><input type="radio" name="mode" value="split"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-network" /></svg>تقسیم بین هوش‌ها</span></label>
             <label title="تستر اول پروژه را تحلیل و تست می‌کند، سازنده باگ‌ها را رفع می‌کند"><input type="radio" name="mode" value="audit"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-scan-search" /></svg>بازرسی و رفع</span></label>
             <label title="سازنده طرح می‌دهد، تستر نقد می‌کند، سازنده طرح نهایی را می‌نویسد (بدون تغییر کد)"><input type="radio" name="mode" value="plan"><span><svg class="ic" aria-hidden="true"><use href="icons.svg#i-map" /></svg>طراحی</span></label>
             <label title="فقط سازنده، بدون بررسی"><input type="radio" name="mode" value="claude"><span><i class="agent-dot claude" aria-hidden="true"></i>فقط سازنده</span></label>
@@ -279,6 +292,29 @@
 <script src="app.js"></script>
 <script src="ext.js"></script>
 <script type="module" src="ops3d.js"></script>
+<script type="module" src="voice/voice.js"></script>
+<script src="orb-core.js"></script>
+<script type="module" src="pages/jarvis.js"></script>
+<script type="module" src="pages/aicore.js"></script>
+<script type="module" src="pages/chat.js"></script>
+<script type="module" src="pages/tasks.js"></script>
+<script type="module" src="pages/workflows.js"></script>
+<script type="module" src="pages/agents.js"></script>
+<script type="module" src="pages/skills.js"></script>
+<script src="vendor/qrcode.js"></script>
+<script type="module" src="pages/phone.js"></script>
+<script type="module" src="pages/sms.js"></script>
+<script type="module" src="pages/mail.js"></script>
+<script type="module" src="pages/arena.js"></script>
+<script type="module" src="pages/docs.js"></script>
+<script type="module" src="pages/prs.js"></script>
+<script type="module" src="pages/webtest.js"></script>
+<script type="module" src="pages/audit.js"></script>
+<script type="module" src="pages/bell.js"></script>
+<script type="module" src="pages/seller.js"></script>
+<script type="module" src="pages/club.js"></script>
+<script type="module" src="pages/settings.js"></script>
+<script type="module" src="cc.js"></script>
 <script type="module" src="dashboard.js"></script>
 </body>
 </html>

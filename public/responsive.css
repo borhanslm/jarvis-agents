@@ -1,0 +1,46 @@
+/* Responsive layer (loaded last): pages use the whole window instead of a fixed ~1200px column.
+   Small window -> compact; a normal window -> full width; full screen / big monitors -> more columns,
+   wider reading areas; TVs and 4K -> everything a little bigger so it stays readable from a distance. */
+
+/* every section fills the window, with side padding that grows with it */
+.pg { max-width: none; padding-inline: clamp(14px, 2vw, 48px); }
+.set-page { max-width: none; }
+.cc-grid { max-width: none; }
+
+/* lists of cards: as many columns as fit */
+.ag-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+.ai-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); }
+.sl-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); }
+.sk-list { grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); }
+
+/* SMS and chat-like pages: as tall as the window */
+.sms-page { min-height: calc(100vh - var(--topbar-height, 52px) - 24px); }
+.sms-grid { min-height: 0; }
+
+/* forms stay a comfortable width even on a wide page */
+.sk-edit, .sk-prev, .jvs-sec, .set-body .field { max-width: 1100px; }
+
+/* ---- big monitors / full screen ---- */
+@media (min-width: 1600px) {
+  :root { --layout-content-max: 1060px; --layout-home-max: 1480px; }
+  .sms-grid { grid-template-columns: minmax(340px, 440px) minmax(0, 1fr); }
+  .sms-msg { max-width: min(70%, 720px); }
+  .set-body { grid-template-columns: 280px minmax(0, 1fr); }
+  .tk { grid-template-columns: 320px minmax(0, 1fr); }
+  .wf { grid-template-columns: 300px minmax(0, 1fr); }
+  .wf-body { grid-template-columns: minmax(0, 1fr) 340px; }
+}
+@media (min-width: 2000px) {
+  :root { --layout-content-max: 1240px; --layout-home-max: 1800px; }
+  .ag-grid { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  .sms-grid { grid-template-columns: minmax(380px, 480px) minmax(0, 1fr); }
+}
+/* TVs, 2K/4K: scale up so text and buttons stay readable from further away */
+@media (min-width: 2400px) { html:not(.no-scale) { zoom: 1.15; } }
+@media (min-width: 3200px) { html:not(.no-scale) { zoom: 1.35; } }
+
+/* ---- small windows ---- */
+@media (max-width: 1100px) {
+  .pg { padding-inline: 14px; }
+  .sk-ai-row { flex-direction: column; align-items: stretch; }
+}

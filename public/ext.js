@@ -1,4 +1,7 @@
 // Smart-mode plan card, connectors (MCP) & plugins, task queue, cost estimate.
+// SVG icons for the connector catalog (no emoji as icons)
+const EXT_IC = { playwright: 'globe', context7: 'book-open', github: 'git-branch', memory: 'brain', thinking: 'sparkles', postgres: 'database', brave: 'search' };
+const extIc = c => ic(EXT_IC[c.key] || EXT_IC[c.id] || 'plug');
 // Loaded after app.js and uses its helpers ($, S, api, dialog, esc, ic, toast, fa, …).
 'use strict';
 
@@ -11,12 +14,12 @@ function buildSmartPlan(m) {
   d.className = 'msg system';
   const plan = m.plan || [];
   const waiting = !m.approved && S.chat && S.chat.status === 'waiting';
-  const opts = v => modelOptions('claude', v).filter(([x]) => x && x !== '__custom');
+  const opts = v => { const o = modelOptions('claude', v).filter(([x]) => x && x !== '__custom'); return m.split && !o.some(([x]) => x === 'codex') ? [['codex', 'Codex'], ...o] : o; };
   const saving = m.topUsd > 0 ? Math.max(0, Math.round((1 - m.estUsd / m.topUsd) * 100)) : 0;
   d.innerHTML = `<div class="smartcard" data-smartid="${esc(m.id)}">
-    <div class="tc-head">${ic('sparkles')}<b>تقسیم کار هوشمند</b><span class="help">${fa(plan.length)} بخش · هر بخش با مدلی که لازم دارد</span></div>
+    <div class="tc-head">${ic(m.split ? 'network' : 'sparkles')}<b>${m.split ? 'تقسیم بین هوش‌ها' : 'تقسیم کار هوشمند'}</b><span class="help">${fa(plan.length)} بخش · ${m.split ? 'هر بخش با یک هوش؛ بخش‌های «هم‌زمان» با هم انجام می‌شوند' : 'هر بخش با مدلی که لازم دارد'}</span></div>
     <ol class="sp-list">${plan.map((p, i) => `<li>
-      <span class="lvl ${esc(p.level)}">${LEVEL_FA[p.level] || esc(p.level)}</span>
+      <span class="lvl ${esc(p.level || '')}">${p.levelFa ? esc(p.levelFa) : LEVEL_FA[p.level] || esc(p.level)}</span>
       <span class="sp-title" dir="auto">${esc(p.title)}</span>
       ${waiting ? `<select data-spmodel="${i}" dir="ltr" aria-label="مدل بخش ${i + 1}">${opts(p.model).map(([v, l]) => `<option value="${esc(v)}" ${v === p.model ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`
         : `<span class="sp-model" dir="ltr">${esc(p.label || prettyModel(p.model))}</span>`}
@@ -78,13 +81,89 @@ function extDialog(tab) {
   if (tab) extTab = tab;
   const tabs = `<div class="ext-tabs" role="tablist">
     <button type="button" role="tab" class="${extTab === 'connectors' ? 'on' : ''}" data-exttab="connectors">${ic('plug', 'sm')}اتصال‌دهنده‌ها (MCP)</button>
-    <button type="button" role="tab" class="${extTab === 'plugins' ? 'on' : ''}" data-exttab="plugins">${ic('puzzle', 'sm')}پلاگین‌ها</button></div>`;
-  dialog(`<div class="dlg-scroll"><h3>${ic('puzzle')}اتصال‌دهنده‌ها و پلاگین‌ها</h3>${tabs}<div id="extBody" class="ext-body">${extTab === 'connectors' ? connectorsHtml() : pluginsHtml()}</div></div>
+    <button type="button" role="tab" class="${extTab === 'plugins' ? 'on' : ''}" data-exttab="plugins">${ic('puzzle', 'sm')}پلاگین‌ها</button>
+    <button type="button" role="tab" class="${extTab === 'skills' ? 'on' : ''}" data-exttab="skills">${ic('graduation-cap', 'sm')}اسکیل‌ها</button>
+    <button type="button" role="tab" class="${extTab === 'search' ? 'on' : ''}" data-exttab="search">${ic('globe', 'sm')}جستجو در اینترنت</button></div>`;
+  dialog(`<div class="dlg-scroll"><h3>${ic('puzzle')}اتصال‌دهنده‌ها، پلاگین‌ها و اسکیل‌ها</h3>${tabs}<div id="extBody" class="ext-body">${extBodyHtml()}</div></div>
     <div class="dlg-actions"><button class="btn ghost" value="cancel">بستن</button></div>`, true);
   $('#dlgBody').onclick = extClick;
+  if (extTab === 'skills') loadSkills();
 }
 window.extDialog = extDialog;
-window.onExtChanged = () => { const b = document.getElementById('extBody'); if (b && $('#dlg').open && !document.getElementById('cnForm')) b.innerHTML = extTab === 'connectors' ? connectorsHtml() : pluginsHtml(); };
+const extBodyHtml = () => extTab === 'connectors' ? connectorsHtml() : extTab === 'skills' ? skillsHtml() : extTab === 'search' ? searchHtml() : pluginsHtml();
+
+// ---------- search the internet: MCP Registry, skills on GitHub, plugins — nothing installs before you review it ----------
+const NS = { q: '', kind: 'all', busy: false, items: null, errors: [], picks: null, preview: null };
+const KIND_FA = { mcp: ['plug', 'اتصال‌دهنده (MCP)'], skill: ['graduation-cap', 'اسکیل'], plugin: ['puzzle', 'پلاگین'] };
+function searchHtml() {
+  if (NS.preview) return skillPreviewHtml(NS.preview);
+  const kinds = [['all', 'همه'], ['mcp', 'اتصال‌دهنده (MCP)'], ['skill', 'اسکیل'], ['plugin', 'پلاگین']];
+  const res = NS.busy ? '<div class="help empty-note">در حال جستجو…</div>' : NS.items == null ? '' : NS.items.length ? NS.items.map((it, i) => `<div class="ext-row">
+      <span class="ext-ic">${ic(KIND_FA[it.kind][0])}</span>
+      <div class="ext-main"><b dir="auto">${esc(it.name)}</b>
+        <div class="ext-roles"><span class="role on">${KIND_FA[it.kind][1]}</span><span class="role">${esc(it.source)}</span>${it.stars ? `<span class="role" dir="ltr">★ ${fa(it.stars)}</span>` : ''}</div>
+        <div class="help" dir="auto">${esc(it.description || '')}</div>
+        ${it.kind === 'mcp' ? `<code class="cn-cmd" dir="ltr">${esc(it.install.type === 'http' ? it.install.url : [it.install.command, ...it.install.args].join(' '))}</code>` : ''}
+        ${it.url ? `<a class="help" href="${esc(it.url)}" target="_blank" rel="noopener" dir="ltr">${ic('external-link', 'sm')} ${esc(it.url.replace(/^https:\/\//, ''))}</a>` : ''}
+        ${NS.picks && NS.picks.i === i ? `<div class="ns-picks">${NS.picks.list.length ? NS.picks.list.slice(0, 60).map((sk, j) => `<button type="button" class="btn small" data-nspick="${j}">${ic('download', 'sm')}${esc(sk.name)}</button>`).join('') : '<span class="help">در این مخزن SKILL.md پیدا نشد.</span>'}</div>` : ''}</div>
+      <div class="ext-acts"><button type="button" class="btn small primary" data-nsget="${i}">${ic('eye', 'sm')}بررسی و نصب</button></div></div>`).join('')
+    : '<div class="help empty-note">چیزی پیدا نشد؛ با کلمه‌های انگلیسی امتحان کنید (مثلاً pdf، notion، ui ux).</div>';
+  return `<p class="help">${ic('info', 'sm')} در فهرست رسمی سرورهای MCP، مجموعه‌ی اسکیل‌های رسمی، GitHub و مارکت‌پلیس پلاگین‌های Claude جستجو می‌کند. <b>چیزی خودکار نصب نمی‌شود:</b> اول فرمان، آدرس یا فایل‌هایش را می‌بینید و بعد تصمیم می‌گیرید.</p>
+    <div class="pl-install" id="nsForm"><input id="nsQ" dir="auto" value="${esc(NS.q)}" placeholder="مثلاً: pdf، notion، ui ux pro max، google maps" aria-label="جستجو">
+      <select id="nsKind" aria-label="نوع">${kinds.map(([k, l]) => `<option value="${k}" ${NS.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <button type="button" class="btn primary small" id="nsGo" ${NS.busy ? 'disabled' : ''}>${ic('search', 'sm')}جستجو</button></div>
+    ${NS.errors.length ? `<p class="warn help">${ic('triangle-alert', 'sm')}${esc(NS.errors.join(' — '))}</p>` : ''}
+    <div class="ext-list">${res}</div>`;
+}
+function skillPreviewHtml(p) {
+  return `<div class="cn-form"><h4>${ic('eye', 'sm')}پیش‌نمایش اسکیل: <span dir="ltr">${esc(p.name)}</span></h4>
+    <p class="help" dir="auto">${esc(p.description || '(بدون توضیح)')}</p>
+    ${p.origin ? `<a class="help" href="${esc(p.origin)}" target="_blank" rel="noopener" dir="ltr">${ic('external-link', 'sm')} ${esc(p.origin.replace(/^https:\/\//, ''))}</a>` : ''}
+    <div class="help">${fa(p.fileCount)} فایل: <span dir="ltr">${p.files.slice(0, 14).map(esc).join('، ')}${p.fileCount > 14 ? '، …' : ''}</span></div>
+    ${p.runnable.length ? `<div class="warn">${ic('triangle-alert', 'sm')}این اسکیل فایل‌های اجرایی دارد (<span dir="ltr">${p.runnable.slice(0, 6).map(esc).join('، ')}</span>). فقط اگر به منبعش اعتماد دارید نصب کنید؛ ایجنت‌ها ممکن است آن‌ها را اجرا کنند.</div>` : ''}
+    <details><summary>متن SKILL.md</summary><pre class="sk-pre" dir="auto">${esc(p.body)}</pre></details>
+    <div class="row-gap"><button type="button" class="btn primary" id="nsInstall">${ic('download', 'sm')}نصب در کتابخانه</button><button type="button" class="btn ghost" id="nsBack">بازگشت به نتایج</button></div></div>`;
+}
+async function nsSearch() {
+  if (NS.q.trim().length < 2) return toast('چه چیزی جستجو شود؟', true);
+  NS.busy = true; NS.items = null; NS.picks = null; NS.preview = null; window.onExtChanged();
+  try { const r = await api(`/ext-search?q=${encodeURIComponent(NS.q.trim())}&kind=${NS.kind}`, { timeout: 60000 }); NS.items = r.items; NS.errors = r.errors || []; }
+  catch (e) { NS.items = []; NS.errors = [e.message]; }
+  NS.busy = false; window.onExtChanged();
+}
+async function nsStage(repo, branch, dir) {
+  toast('در حال گرفتن فایل‌های اسکیل…');
+  try { NS.preview = await api('/ext-search/stage', { body: { repo, branch, dir }, timeout: 120000 }); window.onExtChanged(); } catch (e) { toast(e.message, true); }
+}
+// Enter in the search box
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target && e.target.id === 'nsQ') { e.preventDefault(); NS.q = e.target.value; NS.kind = $('#nsKind').value; nsSearch(); } });
+window.extSearch = (q, kind) => { NS.q = q || ''; NS.kind = kind || 'all'; extDialog('search'); if (NS.q) nsSearch(); };
+window.addEventListener('jarvis:ev', e => { const d = e.detail || {}; if (d.type === 'extSearch') window.extSearch(d.query, d.kind); });
+
+// ---------- skills (the full editor is the Skills page; this tab lists them and starts the common actions) ----------
+let skillList = null;
+async function loadSkills() {
+  try { skillList = await api('/skills'); } catch { skillList = skillList || []; }
+  const b = document.getElementById('extBody'); if (b && extTab === 'skills' && $('#dlg').open) b.innerHTML = skillsHtml();
+}
+const SK_SRC = { custom: 'ساخت شما', imported: 'وارد‌شده', uploaded: 'آپلودشده', voice: 'یادگرفته با صدا', video: 'یادگرفته از ویدیو', internet: 'از اینترنت' };
+function skillsHtml() {
+  const list = skillList;
+  const rows = list == null ? '<div class="help empty-note">در حال خواندن…</div>' : list.length ? list.map(s => `<div class="ext-row">
+      <span class="ext-ic">${ic('book-open')}</span>
+      <div class="ext-main"><b dir="ltr">${esc(s.name)}</b>${s.source ? `<span class="pill">${esc(SK_SRC[s.source] || s.source)}</span>` : ''}<div class="help" dir="auto">${esc(s.description || '')}</div></div>
+      <div class="ext-acts"><button type="button" class="btn small ghost" data-skopen="">${ic('pencil', 'sm')}ویرایش</button></div></div>`).join('')
+    : '<div class="help empty-note">هنوز اسکیلی ندارید.</div>';
+  return `<p class="help">${ic('info', 'sm')} اسکیل یعنی «روش انجام یک کار» که ایجنت‌ها و جارویس دنبالش می‌کنند. پلاگین‌ها هم اسکیل می‌آورند؛ به جارویس هم می‌شود با صدا گفت «یادت بگیر وقتی گفتم … این کارها را بکن».</p>
+    <div class="row-gap"><button type="button" class="btn primary small" data-skopen="ai">${ic('sparkles', 'sm')}ساخت با هوش مصنوعی</button>
+      <button type="button" class="btn small" data-skopen="upload">${ic('upload', 'sm')}آپلود (SKILL.md یا zip)</button>
+      <button type="button" class="btn small" data-skopen="video">${ic('play', 'sm')}یادگیری با ویدیو</button>
+      <button type="button" class="btn small ghost" data-skopen="new">${ic('plus', 'sm')}نوشتن دستی</button>
+      <button type="button" class="btn small ghost" data-skopen="">${ic('external-link', 'sm')}صفحه‌ی کامل اسکیل‌ها</button></div>
+    <h4>کتابخانه${list ? ` (${fa(list.length)})` : ''}</h4><div class="ext-list">${rows}</div>`;
+}
+window.onExtChanged = () => { const b = document.getElementById('extBody'); if (b && $('#dlg').open && !document.getElementById('cnForm')) b.innerHTML = extBodyHtml(); };
+window.addEventListener('jarvis:ev', e => { if (e.detail && e.detail.type === 'skills') { skillList = e.detail.skills; window.onExtChanged(); } });
 
 function connectorsHtml() {
   const list = S.connectors || [];
@@ -93,7 +172,7 @@ function connectorsHtml() {
     const missing = (c.secrets || []).some(s => !s.set);
     return `<div class="ext-row ${c.enabled ? '' : 'off'}">
       <label class="switch" title="فعال/غیرفعال"><input type="checkbox" data-cntoggle="${esc(c.id)}" ${c.enabled ? 'checked' : ''}><span></span></label>
-      <span class="ext-ic">${esc(c.icon || '🔌')}</span>
+      <span class="ext-ic">${extIc(c)}</span>
       <div class="ext-main"><b dir="auto">${esc(c.name)}</b>${c.plugin ? '<span class="pill">از پلاگین</span>' : ''}
         <div class="help" dir="auto">${esc(c.desc || '')}</div><code class="cn-cmd" dir="ltr">${esc(c.type === 'http' ? c.url : [c.command, ...(c.args || [])].join(' '))}</code>
         <div class="ext-roles">${Object.keys(ROLE_FA).map(r => `<span class="role ${c.roles && c.roles[r] ? 'on' : ''}">${ROLE_FA[r]}</span>`).join('')}
@@ -103,11 +182,13 @@ function connectorsHtml() {
         <button type="button" class="btn small ghost" data-cnedit="${esc(c.id)}">${ic('pencil', 'sm')}ویرایش</button></div></div>`;
   }).join('') : '<div class="help empty-note">هنوز اتصال‌دهنده‌ای ندارید. از فهرست زیر یکی اضافه کنید — بعد ایجنت‌ها می‌توانند از ابزارهایش استفاده کنند.</div>';
   const cat = (S.connectorCatalog || []).map(c => `<button type="button" class="cat-card ${have.has(c.key) ? 'added' : ''}" data-cnadd="${esc(c.key)}" ${have.has(c.key) ? 'disabled' : ''}>
-      <span class="ext-ic">${esc(c.icon)}</span><b>${esc(c.name)}</b><span class="help">${esc(c.desc)}</span>${have.has(c.key) ? '<em>اضافه شد</em>' : ''}</button>`).join('');
+      <span class="ext-ic">${extIc(c)}</span><b>${esc(c.name)}</b><span class="help">${esc(c.desc)}</span>${have.has(c.key) ? '<em>اضافه شد</em>' : ''}</button>`).join('');
   return `<p class="help">${ic('info', 'sm')} اتصال‌دهنده‌ها همان سرورهای MCP هستند که Claude Code هم استفاده می‌کند. هر کدام را می‌توانید فقط به سازنده، تستر یا ساب‌ایجنت‌ها بدهید؛ روی همه‌ی موتورها (Claude، Codex و اتصال‌هایی مثل DeepSeek) کار می‌کند.</p>
     <div class="ext-list">${rows}</div>
     <h4>افزودن</h4><div class="cat-grid">${cat}
-      <button type="button" class="cat-card custom" data-cnadd=""><span class="ext-ic">➕</span><b>اتصال‌دهنده‌ی دلخواه</b><span class="help">هر سرور MCP: یک فرمان (مثل npx …) یا یک آدرس https</span></button></div>`;
+      <button type="button" class="cat-card" data-openmail=""><span class="ext-ic">${ic('mail')}</span><b>ایمیل (Gmail، Yahoo، …)</b><span class="help">خواندن صندوق، نوشتن و جواب با هوش مصنوعی — ارسال فقط با تأیید شما</span></button>
+      <button type="button" class="cat-card" data-openmail=""><span class="ext-ic">${ic('calendar')}</span><b>تقویم (Google، Outlook، Apple)</b><span class="help">رویدادهای پیش‌رو برای جارویس و یادآوری ۱۵ دقیقه قبل</span></button>
+      <button type="button" class="cat-card custom" data-cnadd=""><span class="ext-ic">${ic('plus')}</span><b>اتصال‌دهنده‌ی دلخواه</b><span class="help">هر سرور MCP: یک فرمان (مثل npx …) یا یک آدرس https</span></button></div>`;
 }
 
 function connectorForm(c) {
@@ -116,6 +197,7 @@ function connectorForm(c) {
       <input type="password" data-cnsecret="${esc(s.name)}" dir="ltr" autocomplete="off" placeholder="${s.set ? 'ذخیره شده — برای تغییر مقدار جدید وارد کنید' : ''}"></div>`).join('');
   $('#extBody').innerHTML = `<div id="cnForm" class="cn-form">
     <h4>${isNew ? 'اتصال‌دهنده‌ی جدید' : 'ویرایش اتصال‌دهنده'}</h4>
+    ${c.fromNet ? `<div class="warn">${ic('triangle-alert', 'sm')} این اتصال‌دهنده از اینترنت پیدا شده (<span dir="ltr">${esc(c.fromNet)}</span>). فرمان یا آدرسش را ببینید؛ فقط اگر به سازنده‌اش اعتماد دارید ذخیره کنید. پیش‌فرض فقط به «سازنده» داده می‌شود.</div>` : ''}
     <div class="field-row"><div class="field" style="flex:0 0 70px"><label>آیکون</label><input id="cnIcon" value="${esc(c.icon || '🔌')}" maxlength="4"></div>
       <div class="field"><label>نام</label><input id="cnName" value="${esc(c.name || '')}" dir="auto"></div></div>
     <div class="field"><label>نوع</label><select id="cnType"><option value="stdio">برنامه‌ی محلی (فرمان)</option><option value="http">آدرس اینترنتی (HTTP)</option></select></div>
@@ -146,7 +228,7 @@ function pluginsHtml() {
   const list = S.plugins || [];
   const rows = list.length ? list.map(p => `<div class="ext-row ${p.enabled ? '' : 'off'}">
       <label class="switch" title="فعال/غیرفعال"><input type="checkbox" data-pltoggle="${esc(p.id)}" ${p.enabled ? 'checked' : ''}><span></span></label>
-      <span class="ext-ic">🧩</span>
+      <span class="ext-ic">${ic('puzzle')}</span>
       <div class="ext-main"><b dir="ltr">${esc(p.name)}</b>${p.version ? `<span class="pill" dir="ltr">v${esc(p.version)}</span>` : ''}
         <div class="help" dir="auto">${esc(p.description || '')}</div>
         <div class="ext-roles">${p.subagents.length ? `<span class="role on">${fa(p.subagents.length)} ایجنت</span>` : ''}${p.skills.length ? `<span class="role on">${fa(p.skills.length)} اسکیل</span>` : ''}${(p.commands || []).length ? `<span class="role on">${fa(p.commands.length)} فرمان</span>` : ''}${p.connectors.length ? `<span class="role on">${fa(p.connectors.length)} اتصال‌دهنده</span>` : ''}
@@ -188,6 +270,28 @@ async function installPlugin(body, btn) {
 async function extClick(e) {
   const t = e.target;
   const tab = t.closest('[data-exttab]'); if (tab) { extDialog(tab.dataset.exttab); return; }
+  if (t.closest('[data-openmail]')) { $('#dlg').close(); window.showSection && window.showSection('mail'); return; }
+  if (t.closest('#nsGo')) { NS.q = $('#nsQ').value; NS.kind = $('#nsKind').value; nsSearch(); return; }
+  const nsg = t.closest('[data-nsget]');
+  if (nsg) {
+    const i = +nsg.dataset.nsget, it = NS.items[i];
+    if (it.kind === 'mcp') { connectorForm({ name: it.name.slice(0, 40), desc: it.description.slice(0, 200), icon: '🌐', type: it.install.type, command: it.install.command, args: it.install.args, url: it.install.url, secrets: (it.install.secrets || []).map(x => ({ ...x, set: false })), roles: { builder: true, reviewer: false, subs: false }, fromNet: it.url || it.id }); return; }
+    if (it.kind === 'skill') {
+      if (it.dir != null) return nsStage(it.repo, it.branch, it.dir);
+      try { const r = await api('/ext-search/skills', { body: { repo: it.repo, branch: it.branch } }); if (r.skills.length === 1) return nsStage(it.repo, it.branch, r.skills[0].dir); NS.picks = { i, list: r.skills, repo: it.repo, branch: it.branch }; window.onExtChanged(); } catch (err) { toast(err.message, true); }
+      return;
+    }
+    if (it.kind === 'plugin') {
+      if (!confirm(`پلاگین «${it.name}» از ${it.source} نصب شود؟\n\nایجنت‌ها، اسکیل‌ها و فرمان‌هایش اضافه می‌شوند؛ اتصال‌دهنده‌هایش خاموش می‌مانند تا خودتان بررسی و روشن کنید.`)) return;
+      extDialog('plugins'); $('#plUrl').value = it.install.url;
+      installPlugin(it.install.pick ? { url: it.install.url, pick: it.install.pick } : { url: it.install.url }, $('#plGit'));
+      return;
+    }
+  }
+  const nsp = t.closest('[data-nspick]'); if (nsp && NS.picks) { const sk = NS.picks.list[+nsp.dataset.nspick]; nsStage(NS.picks.repo, NS.picks.branch, sk.dir); return; }
+  if (t.closest('#nsBack')) { if (NS.preview) api('/skills/upload/cancel', { body: { token: NS.preview.token } }).catch(() => {}); NS.preview = null; window.onExtChanged(); return; }
+  if (t.closest('#nsInstall')) { try { const sk = await api('/skills/upload/confirm', { body: { token: NS.preview.token } }); toast(`اسکیل «${sk.name}» نصب شد`); NS.preview = null; window.onExtChanged(); } catch (err) { toast(err.message, true); NS.preview = null; window.onExtChanged(); } return; }
+  const sko = t.closest('[data-skopen]'); if (sko) { $('#dlg').close(); window.openSkills ? window.openSkills(sko.dataset.skopen) : window.showSection && window.showSection('skills'); return; }
   const add = t.closest('[data-cnadd]');
   if (add) { const c = (S.connectorCatalog || []).find(x => x.key === add.dataset.cnadd); connectorForm(c ? { ...c, catalog: c.key, secrets: (c.secrets || []).map(s => ({ ...s, set: false })) } : { roles: { builder: true, reviewer: true, subs: false } }); return; }
   const ed = t.closest('[data-cnedit]'); if (ed) { connectorForm((S.connectors || []).find(c => c.id === ed.dataset.cnedit)); return; }
@@ -220,7 +324,7 @@ $('#btnExt').onclick = () => extDialog();
 
 // ---------- task queue ----------
 const QSTATUS = { pending: 'در انتظار', running: 'در حال اجرا', done: 'تمام شد', error: 'خطا', stopped: 'متوقف', budget: 'سقف هزینه', 'needs-attention': 'نیاز به بررسی', unverified: 'تست‌نشده' };
-const QMODE = { team: 'تیمی', smart: 'هوشمند', audit: 'بازرسی و رفع', plan: 'طراحی', claude: 'فقط سازنده', codex: 'فقط تستر' };
+const QMODE = { team: 'تیمی', smart: 'هوشمند', split: 'تقسیم بین هوش‌ها', audit: 'بازرسی و رفع', plan: 'طراحی', claude: 'فقط سازنده', codex: 'فقط تستر' };
 function queueListHtml() {
   const jobs = [...(S.queueJobs || [])].sort((a, b) => (a.startAt - b.startAt));
   if (!jobs.length) return '<div class="help empty-note">صف خالی است.</div>';
