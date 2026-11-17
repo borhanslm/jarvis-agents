@@ -70,6 +70,21 @@ const { Providers, PRESETS } = require('./lib/providers');
 const providers = new Providers(DATA, setup.secrets);
 orch.resolveProvider = spec => providers.resolve(spec);
 orch.chatLLM = o => chatLLM(o);
+// ---- continue work that was cut off when JARVIS closed ----
+async function resumeChat(chat, via = 'panel') {
+  const r = chat.activeRun; if (!r || chat.status !== 'interrupted') throw new Error('کاری برای ادامه نیست');
+  if (orch.running.has(chat.id)) throw new Error('این چت در حال اجراست');
+  const proj = store.project(chat.projectId); if (!proj) throw new Error('پروژه‌ی این چت حذف شده');
+  if (needsClaudeAccount(chat, r.mode) && !(await claudeReady())) throw new Error('Claude هنوز وصل نیست');
+  const text = `ادامه‌ی کاری که با بسته شدن جارویس نیمه‌کاره ماند:\n${r.text}\n\n(Resume: the previous run of this task was interrupted when the app closed. First check what is already done in the project files, then finish the task. Do not redo finished work.)`;
+  audit.log(via, 'resume_run', { chat: chat.title, mode: r.mode });
+  orch.run(chat, proj, text, r.mode, (r.attachments || []).filter(f => fs.existsSync(f)).length ? { attachments: r.attachments.filter(f => fs.existsSync(f)) } : {}).catch(e => console.error('resume', e));
+}
+setTimeout(async () => {
+  const cut = [...store.chats.values()].filter(c => c.status === 'interrupted' && c.activeRun);
+  for (const c of cut) notices.add({ kind: 'job', title: `کار «${c.title}» با بسته شدن جارویس نیمه‌کاره ماند`, body: store.settings().autoResume ? 'خودکار ادامه داده می‌شود.' : 'در همان چت «ادامه» را بزنید.', section: 'code', key: 'resume:' + c.id });
+  if (store.settings().autoResume) for (const c of cut) { try { await resumeChat(c, 'system'); } catch (e) { console.error('auto-resume', e.message); } }
+}, 15000).unref();
 // budgets: a notice when one is close to its end (once a day each) or used up
 const budgetSaid = new Map();
 orch.onBudget = b => { const k = b.kind + ':' + b.name + ':' + (b.warn ? 'w' : 'x'); if (Date.now() - (budgetSaid.get(k) || 0) < 864e5) return; budgetSaid.set(k, Date.now());
@@ -1196,6 +1211,7 @@ async function api(req, res, url) {
       }
     } catch (e) { return send(res, 400, { error: e.message }); }
   }
+  if (parts[0] === 'resume' && m === 'GET') return send(res, 200, { chats: [...store.chats.values()].filter(c => c.status === 'interrupted' && c.activeRun).map(c => ({ ...store.chatSummary(c), task: c.activeRun.text.slice(0, 200), mode: c.activeRun.mode, at: c.activeRun.at })) });
   if (parts[0] === 'budgets' && m === 'GET') {
     return send(res, 200, {
       projects: store.projects().map(p => ({ id: p.id, name: p.name, spent: usage.monthCost({ projectId: p.id }), budget: +store.settings(p.id).projectBudgetUsd || 0, override: p.settings || {} })),
@@ -1810,6 +1826,7 @@ ${prefs ? 'What you know about the user:\n' + prefs + '\n' : ''}Answer with ONLY
       return send(res, 200, { ok: true });
     }
     if (parts[2] === 'stop' && m === 'POST') return send(res, 200, { ok: orch.stop(chat.id) });
+    if (parts[2] === 'resume' && m === 'POST') { try { await resumeChat(chat, 'panel'); return send(res, 200, { ok: true }); } catch (e) { return send(res, 400, { error: e.message }); } }
     if (parts[2] === 'smart-approve' && m === 'POST') return send(res, 200, { ok: orch.approveSmart(chat.id, { models: Array.isArray(body.models) ? body.models.map(String) : null }) });
     if (parts[2] === 'estimate' && m === 'GET') return send(res, 200, estimateRun(chat, url.searchParams.get('mode') || 'team'));
     if (parts[2] === 'attach' && m === 'POST') {

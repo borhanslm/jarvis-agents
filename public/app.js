@@ -39,7 +39,7 @@ function toast(msg, err) {
   setTimeout(() => d.remove(), 4500);
 }
 const fmtTime = ts => new Date(ts).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
-const STATUS = { idle: 'آماده', running: 'در حال اجرا', done: 'تمام شد', error: 'خطا', stopped: 'متوقف', 'needs-attention': 'نیاز به بررسی', unverified: 'تست‌نشده', budget: 'سقف هزینه', waiting: 'منتظر سهمیه' };
+const STATUS = { idle: 'آماده', running: 'در حال اجرا', done: 'تمام شد', error: 'خطا', stopped: 'متوقف', 'needs-attention': 'نیاز به بررسی', unverified: 'تست‌نشده', budget: 'سقف هزینه', waiting: 'منتظر سهمیه', interrupted: 'نیمه‌کاره (بسته شدن جارویس)' };
 const AGENT = { claude: 'Claude', codex: 'Codex', user: 'شما', system: 'جارویس' };
 // SVG icon from the local Lucide sprite (public/icons.svg).
 const ic = (name, cls = '') => `<svg class="ic ${cls}" aria-hidden="true"><use href="icons.svg#i-${name}"/></svg>`;
@@ -221,6 +221,13 @@ function renderStream() {
   }
   // Results of tools whose call is hidden are skipped with it.
   for (let i = from; i < msgs.length; i++) appendMessage(msgs[i], false);
+  // cut off when JARVIS closed: offer to continue
+  if (S.chat.status === 'interrupted') {
+    const b = document.createElement('div'); b.className = 'sys resume-bar';
+    b.innerHTML = `<span>${ic('triangle-alert', 'sm')} این کار با بسته شدن جارویس نیمه‌کاره ماند. ایجنت‌ها از همان‌جا ادامه می‌دهند و اول بررسی می‌کنند چه چیزهایی انجام شده.</span><button type="button" class="btn small primary">${ic('play', 'sm')}ادامه</button>`;
+    b.querySelector('button').onclick = async () => { try { await api(`/chats/${S.chat.id}/resume`, { body: {} }); toast('ادامه‌ی کار شروع شد'); } catch (e) { toast(e.message, true); } };
+    st.appendChild(b);
+  }
   if (!arguments[0]) st.scrollTop = st.scrollHeight;
 }
 const RENDER_PAGE = 300;
@@ -552,6 +559,7 @@ const SETTINGS_SCHEMA_ALL = [
     { k: 'codexPriceOut', t: 'number', step: 0.05, l: 'قیمت خروجی Codex برای هر ۱ میلیون توکن (دلار)' },
     { k: 'budgetOnSubscription', t: 'bool', l: 'سقف هزینه روی اشتراک Pro/Max هم اعمال شود', h: 'روی اشتراک، دلارها فقط «معادل API» هستند. روشنش کنید اگر می‌خواهید کارهای خیلی سنگین هم زودتر متوقف شوند.' },
     { k: 'onClaudeLimit', t: 'select', l: 'وقتی سهمیه‌ی Claude (Pro/Max) پر شد', o: [['wait', 'صبر کن و بعد از تمدید با Claude ادامه بده'], ['codex', 'Codex جای Claude کد بنویسد تا سهمیه تمدید شود']], h: 'در حالت Codex، نوشتن و رفع کد به Codex سپرده می‌شود و بررسی همچنان با Codex است؛ بعد از ساعت تمدید، Claude دوباره سازنده می‌شود. اگر سهمیه‌ی Codex هم پر باشد، صبر می‌کند.' },
+    { k: 'autoResume', t: 'bool', l: 'اگر جارویس وسط کار بسته شد، بعد از باز شدن خودکار ادامه بده', h: 'خاموش باشد، در همان چت دکمه‌ی «ادامه» می‌آید و یک اعلان هم می‌گیرید.' },
     { k: 'waitOnLimit', t: 'bool', l: 'وقتی سهمیه‌ی Pro پر شد، صبر کن و بعد از تمدید خودکار ادامه بده', h: 'کار متوقف نمی‌شود؛ گفتگو «منتظر سهمیه» می‌شود و سر ساعت تمدید از همان‌جا ادامه می‌دهد. «توقف» آن را لغو می‌کند.' },
     { k: 'limitMaxWaitHours', t: 'number', step: 1, l: 'حداکثر زمان انتظار برای تمدید سهمیه (ساعت)' },
     { k: 'specialistsTiming', t: 'select', l: 'زمان اجرای ساب‌ایجنت‌های تستر', o: [['after-pass', 'فقط بعد از تأیید تستر اصلی (ارزان‌تر)'], ['every-round', 'هر دور، موازی با تستر اصلی (سریع‌تر، گران‌تر)']] },
