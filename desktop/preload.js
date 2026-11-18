@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld('jarvisDesktop', {
   setTheme: theme => ipcRenderer.send('jarvis:set-theme', ['light', 'system'].includes(theme) ? theme : 'dark'),
   applySettings: () => ipcRenderer.send('jarvis:desktop-settings'),
   appInfo: () => ipcRenderer.invoke('jarvis:app-info'),
-  updateAction: a => ipcRenderer.send('jarvis:update', a === 'install' ? 'install' : 'check'),
+  updateAction: a => ipcRenderer.send('jarvis:update', ['install', 'now'].includes(a) ? a : 'check'),
   onUpdate: cb => ipcRenderer.on('jarvis:update-state', (_e, s) => cb(s || {})),
   // voice assistant state / spoken reply (tray tooltip + notification while the window is hidden)
   voice: ev => ipcRenderer.send('jarvis:voice', { state: String(ev && ev.state || ''), label: String(ev && ev.label || '').slice(0, 80), reply: ev && ev.reply ? String(ev.reply).slice(0, 400) : '' }),

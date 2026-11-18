@@ -53,10 +53,15 @@ if (!app.requestSingleInstanceLock()) {
     app.quit();
   };
   // ---- updates from GitHub Releases (only in the installed app) ----
-  let updater = null, updateState = { state: 'idle' };
+  let updater = null, updateState = { state: 'idle' }, installWhenReady = false;
   const sendUpdate = st => { updateState = st; if (win && !win.isDestroyed()) win.webContents.send('jarvis:update-state', st); };
+  function installNow() {
+    quitting = true;
+    try { srv.stopAll(); } catch (err) { log('stopAll', err); }
+    setImmediate(() => updater.quitAndInstall(false, true)); // silent install, then JARVIS opens again
+  }
   function checkUpdates(manual) {
-    if (!updater) { if (manual) sendUpdate({ state: 'unsupported' }); return; }
+    if (!updater) { installWhenReady = false; if (manual) sendUpdate({ state: 'unsupported' }); return; }
     if (!manual && desk().desktopAutoUpdate === false) return;
     sendUpdate({ state: 'checking', manual: !!manual });
     updater.checkForUpdates().catch(e => { log('update check', e && e.message || e); sendUpdate({ state: 'error', message: String(e && e.message || e).slice(0, 300), manual: !!manual }); });
@@ -68,23 +73,26 @@ if (!app.requestSingleInstanceLock()) {
     updater.autoDownload = true;
     updater.autoInstallOnAppQuit = true;
     updater.on('update-available', i => sendUpdate({ state: 'downloading', version: i.version, percent: 0 }));
-    updater.on('update-not-available', i => sendUpdate({ state: 'latest', version: i && i.version, manual: updateState.manual }));
+    updater.on('update-not-available', i => { installWhenReady = false; sendUpdate({ state: 'latest', version: i && i.version, manual: updateState.manual }); });
     updater.on('download-progress', p => sendUpdate({ state: 'downloading', version: updateState.version, percent: Math.round(p.percent || 0) }));
     updater.on('update-downloaded', i => {
+      // «به‌روزرسانی الان» in settings: no second question, install and restart at once
+      if (installWhenReady) { installWhenReady = false; sendUpdate({ state: 'installing', version: i.version }); return installNow(); }
       sendUpdate({ state: 'ready', version: i.version });
       if (Notification.isSupported()) new Notification({ title: 'نسخه‌ی تازه‌ی جارویس آماده است', body: `نسخه‌ی ${i.version} دانلود شد. از داخل برنامه «نصب» را بزنید، یا با بستن کامل برنامه خودکار نصب می‌شود.` }).show();
     });
-    updater.on('error', e => { log('update error', e && e.stack || e); sendUpdate({ state: 'error', message: String(e && e.message || e).slice(0, 300), manual: updateState.manual }); });
+    updater.on('error', e => { installWhenReady = false; log('update error', e && e.stack || e); sendUpdate({ state: 'error', message: String(e && e.message || e).slice(0, 300), manual: updateState.manual }); });
     setTimeout(() => checkUpdates(false), 20000);
     setInterval(() => checkUpdates(false), 6 * 3600 * 1000).unref();
   }
   ipcMain.handle('jarvis:app-info', () => ({ version: app.getVersion(), packaged: app.isPackaged, update: updateState }));
   ipcMain.on('jarvis:update', (_e, action) => {
     if (action === 'check') return checkUpdates(true);
-    if (action === 'install' && updater && updateState.state === 'ready') {
-      quitting = true;
-      try { srv.stopAll(); } catch (err) { log('stopAll', err); }
-      setImmediate(() => updater.quitAndInstall(false, true));
+    if (action === 'install' && updater && updateState.state === 'ready') return installNow();
+    if (action === 'now') {
+      if (updater && updateState.state === 'ready') return installNow();
+      installWhenReady = true;
+      if (updateState.state !== 'downloading' && updateState.state !== 'checking') checkUpdates(true);
     }
   });
 

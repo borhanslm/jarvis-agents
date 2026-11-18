@@ -82,6 +82,7 @@ function render(proj) {
         const f = sc.flatMap(s => s.fields).find(x => x.k === k); const off = (isProject && f.global);
         return `<label class="set-tile ${P.values[k] ? 'on' : ''} ${off ? 'off' : ''}"><span class="set-tile-ic">${ic(icon)}</span><b>${esc(title)}</b><span class="help">${esc(sub)}</span>
           <span class="switch big"><input type="checkbox" data-k="${k}" ${P.values[k] ? 'checked' : ''} ${off ? 'disabled' : ''} aria-label="${esc(title)}"><span></span></span></label>`; }).join('')}</div>
+      ${updateCard()}
       <h2 class="pg-sub">سقف هزینه‌ی هر اجرا</h2>
       <div class="set-budget"><input type="range" min="0" max="30" step="0.5" data-k="maxRunCostUsd" value="${esc(P.values.maxRunCostUsd ?? 5)}" aria-label="سقف هزینه"><output id="setBudget">${budgetText(P.values.maxRunCostUsd)}</output></div>
       <h2 class="pg-sub">بخش‌های دیگر</h2>
@@ -107,8 +108,38 @@ function render(proj) {
         <div class="set-foot">${isProject && P.override ? `<button type="button" class="btn btn-sm ghost danger" id="setReset">${ic('rotate-ccw', 'sm')}حذف تنظیمات اختصاصی این پروژه</button>` : ''}${!isProject ? `<button type="button" class="btn btn-sm ghost" id="setDefaults">${ic('rotate-ccw', 'sm')}بازگشت همه به پیش‌فرض</button>` : ''}
           ${!isProject && S.settings && S.settings.requireToken && localStorage.getItem('jarvis.token') ? `<span class="help">${ic('key-round', 'sm')} لینک ورود: <code dir="ltr">${esc(location.origin)}/?token=…</code></span>` : ''}</div>
       </section></div></div>`;
-  wire();
+  wire(); wireUpdate();
   if (P.focusKey) { const el = P.el.querySelector(`[data-k="${P.focusKey}"]`); P.focusKey = null; if (el) { el.closest('.set-row, .set-tile')?.classList.add('flash'); el.scrollIntoView({ block: 'center' }); el.focus(); } }
+}
+// ---- «به‌روزرسانی الان»: check GitHub, download and install at once (desktop app only) ----
+const U = { info: null, st: {}, wired: false };
+const UPD = { checking: 'در حال بررسی GitHub…', downloading: 'در حال دانلود', installing: 'در حال نصب؛ جارویس بسته و دوباره باز می‌شود…', ready: 'دانلود شد', latest: 'آخرین نسخه را دارید', error: 'خطا', unsupported: 'فقط در نسخه‌ی نصب‌شده' };
+function updateCard() {
+  const d = window.jarvisDesktop;
+  if (!d || !d.updateAction) return '';
+  if (!U.wired) {
+    U.wired = true;
+    d.onUpdate(s => { U.st = s; paintUpdate(); });
+    if (d.appInfo) d.appInfo().then(i => { U.info = i; if (i && i.update && !U.st.state) U.st = i.update; paintUpdate(); }).catch(() => {});
+  }
+  return `<h2 class="pg-sub">به‌روزرسانی</h2><div class="sl-card set-upd" id="setUpd">${updateInner()}</div>`;
+}
+function updateInner() {
+  const s = U.st || {}, busy = ['checking', 'downloading', 'installing'].includes(s.state), v = U.info && U.info.version;
+  const msg = s.state === 'downloading' ? `${UPD.downloading} نسخه‌ی ${esc(s.version || '')}… ${faN(s.percent || 0)}٪`
+    : s.state === 'error' ? `${UPD.error}: <span dir="ltr">${esc(s.message || '')}</span>` : s.state && UPD[s.state] ? UPD[s.state] + (s.version && s.state !== 'latest' ? ` (${esc(s.version)})` : '') : '';
+  return `<div class="set-upd-row"><span class="set-tile-ic">${ic('download')}</span>
+    <div><b>نسخه‌ی فعلی: <span dir="ltr">${esc(v || '…')}</span></b><span class="help" role="status">${msg || 'نسخه‌ی تازه را از GitHub می‌گیرد و همان لحظه نصب می‌کند.'}</span>
+    ${s.state === 'downloading' ? `<progress max="100" value="${+s.percent || 0}" aria-label="پیشرفت دانلود"></progress>` : ''}</div>
+    <button type="button" class="btn btn-primary" id="setUpdNow" ${busy ? 'disabled' : ''}>${ic('refresh-cw', 'sm')}${busy ? 'لطفاً صبر کنید…' : 'به‌روزرسانی الان'}</button></div>`;
+}
+function paintUpdate() { const box = document.getElementById('setUpd'); if (box) { box.innerHTML = updateInner(); wireUpdate(); } }
+function wireUpdate() {
+  const b = document.getElementById('setUpdNow');
+  if (b) b.onclick = () => {
+    if (!confirm('جارویس نسخه‌ی تازه را از GitHub می‌گیرد و همان لحظه نصب می‌کند؛ برنامه بسته و دوباره باز می‌شود و کارهای در حال اجرا متوقف می‌شوند. ادامه؟')) return;
+    U.st = { state: 'checking' }; paintUpdate(); window.jarvisDesktop.updateAction('now');
+  };
 }
 const budgetText = v => (+v ? '$' + (+v).toFixed(1) + ' در هر اجرا' : 'بدون سقف');
 
