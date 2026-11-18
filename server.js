@@ -2046,8 +2046,8 @@ server.listen(PORT, HOST, () => {
   console.log(`  Panel:  ${panel}`);
   if (store.settings().requireToken) console.log(`  (access token is required — open the link above; token file: ${TOKEN_FILE})`);
   if (process.env.JARVIS_OPEN === '1') {
-    if (process.platform === 'win32') execFile('rundll32', ['url.dll,FileProtocolHandler', panel], () => {});
-    else execFile(process.platform === 'darwin' ? 'open' : 'xdg-open', [panel], () => {});
+    if (process.platform === 'win32') execFile('rundll32', ['url.dll,FileProtocolHandler', panel], { windowsHide: true }, () => {});
+    else execFile(process.platform === 'darwin' ? 'open' : 'xdg-open', [panel], { windowsHide: true }, () => {});
   }
   console.log(`  Claude: ${agents.CLIS.claude ? agents.CLIS.claude.cmd : 'NOT FOUND'}`);
   console.log(`  Codex:  ${agents.CLIS.codex ? (agents.CLIS.codex.pre[0] || agents.CLIS.codex.cmd) : 'NOT FOUND'}\n`);
