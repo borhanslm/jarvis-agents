@@ -90,6 +90,6 @@
     return o;
   }
   // a canvas sized to its box (sharp on high-DPI screens)
-  function fit(canvas) { const r = canvas.getBoundingClientRect(), d = Math.min(devicePixelRatio || 1, 2); canvas.width = Math.round(r.width * d); canvas.height = Math.round(r.height * d); }
+  function fit(canvas) { const r = canvas.getBoundingClientRect(), d = Math.min(devicePixelRatio || 1, r.width * r.height > 600000 ? 1 : 1.5); canvas.width = Math.round(r.width * d); canvas.height = Math.round(r.height * d); }
   window.JarvisOrb = { create, palette, fit, rgbOf, turn };
 })();

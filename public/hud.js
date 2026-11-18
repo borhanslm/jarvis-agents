@@ -8,7 +8,7 @@ export function makeHud(host, { label = 'JARVIS' } = {}) {
   host.appendChild(cv);
   const ctx = cv.getContext('2d');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let W = 0, H = 0, dpr = 1, raf = 0, running = true, busy = false, online = true, level = 0, mode = 'idle', t0 = performance.now();
+  let lastDraw = 0, W = 0, H = 0, dpr = 1, raf = 0, running = true, busy = false, online = true, level = 0, mode = 'idle', t0 = performance.now();
   let C = {};
   const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   function colors() {
@@ -49,7 +49,9 @@ export function makeHud(host, { label = 'JARVIS' } = {}) {
 
   function frame(now) {
     raf = requestAnimationFrame(frame);
-    if (document.hidden || !W) return;
+    if (document.hidden || !W || document.documentElement.classList.contains('jv-paused')) return;
+    // 30 frames a second is plenty for a slow-moving HUD (half the work of 60, or of 144 Hz screens)
+    if (now - lastDraw < 32) return; lastDraw = now;
     const t = reduce ? 0 : (now - t0) / 1000;
     const sp = busy ? 2.2 : mode === 'speaking' || mode === 'recording' ? 1.6 : 1;
     level += ((mode === 'speaking' || mode === 'recording' ? 0.6 + 0.4 * Math.abs(Math.sin(t * 7)) : busy ? 0.45 : 0.15) - level) * 0.08;

@@ -155,7 +155,7 @@ body.has-rail #btnOps, body.has-rail #btnExt { display: none; }
 .cc-view::before { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
   background: repeating-linear-gradient(0deg, transparent 0 3px, color-mix(in srgb, var(--color-primary) 3%, transparent) 3px 4px); }
 .cc-view::after { content: ''; position: fixed; left: 0; right: 0; height: 120px; top: -120px; pointer-events: none; z-index: 0;
-  background: linear-gradient(transparent, color-mix(in srgb, var(--color-primary) 7%, transparent), transparent); animation: hudScan 9s linear infinite; }
+  background: linear-gradient(transparent, color-mix(in srgb, var(--color-primary) 7%, transparent), transparent); animation: hudScan 9s linear 2; }
 @keyframes hudScan { to { transform: translateY(calc(100vh + 120px)); } }
 .cc-grid { position: relative; z-index: 1; counter-reset: hud; }
 
@@ -207,3 +207,8 @@ body.has-rail #btnOps, body.has-rail #btnExt { display: none; }
 .rail-btn.on { box-shadow: inset 0 0 12px color-mix(in srgb, var(--color-primary) 25%, transparent); }
 @media (prefers-reduced-motion: reduce) { .cc-view::after { animation: none; display: none; } }
 .cc-addtask input { background: var(--color-surface-inset); border: 1px solid color-mix(in srgb, var(--color-primary) 20%, transparent); border-radius: 2px; color: var(--color-fg); padding: 6px 10px; }
+
+/* performance: the scanning stripe gets its own GPU layer (no full-window repaint per frame),
+   and nothing animates while the window is hidden or minimized */
+.cc-view::after { will-change: transform; }
+html.jv-paused *, html.jv-paused *::before, html.jv-paused *::after { animation-play-state: paused !important; }

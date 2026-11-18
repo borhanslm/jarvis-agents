@@ -97,6 +97,9 @@ function size() {
 function frame(now) {
   if (!P.el) return;
   P.raf = requestAnimationFrame(frame);
+  // 30 frames a second, and nothing while the window is hidden (the orb fills the whole page)
+  if (document.hidden || document.documentElement.classList.contains('jv-paused') || now - (P.last || 0) < 32) return;
+  P.last = now;
   const c = $('#jvOrb', P.el); if (!c || !c.width) return;
   if (!P.orb || P.orb.canvas !== c) P.orb = window.JarvisOrb.create(c); // the page may be drawn again (e.g. a new skin)
   const v = V(); P.orb.draw(now, { state: v.state, level: v.level });

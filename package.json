@@ -1,7 +1,7 @@
 {
   "name": "jarvis-agents",
   "productName": "JARVIS",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "JARVIS — a local desktop app where Claude builds and Codex tests your code",
   "author": "JARVIS",
   "main": "desktop/main.js",

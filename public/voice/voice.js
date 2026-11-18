@@ -134,9 +134,15 @@ function idleSegment(c, loud) {
     const seg = V.idleSeg, ms = V.idleSegMs;
     V.idleSeg = []; V.idleSegMs = 0; V.idleVoiced = false; V.idleSilence = 0;
     if (ms < 400 || ms > 4000) return;
+    // a TV or a long conversation nearby: after a few phrases without «جارویس», check less often
+    // (each check runs speech-to-text on this computer and costs CPU/GPU)
+    const now = Date.now(); V.faMiss = (V.faMiss || []).filter(t => now - t < 30000);
+    if (V.faMiss.length >= 3 && now - (V.faLastCheck || 0) < Math.min(8000, 1500 * V.faMiss.length)) return;
+    V.faLastCheck = now;
     V.faChecking = true;
     stt(concat(seg), 'local', 'fa').then(r => {
       const m = WAKE_TEXT.exec(r.text || '');
+      if (!m) V.faMiss.push(Date.now()); else V.faMiss = [];
       if (m && V.state === 'idle') {
         const rest = (r.text.slice(m.index + m[0].length) || '').replace(/^[\s,.،!?؟]+/, '').trim();
         if (rest.split(/\s+/).length >= 2) { addLog('user', r.text); ask(rest); } // «جارویس، ساعت چنده؟» in one breath
@@ -238,13 +244,19 @@ function openSection(o) {
 }
 
 // ---------- speaking ----------
-async function speakText(text, { thenListen = false } = {}) {
-  if (!text || settings().voiceSpeak === false) { afterSpeech(thenListen); return; }
-  setState('speaking');
-  try {
-    const r = await api('/voice/tts', { body: { text } });
-    if (V.state !== 'speaking') return;
-    const bytes = Uint8Array.from(atob(r.audio), c => c.charCodeAt(0));
+// The answer is spoken sentence by sentence: the first sentence plays as soon as its audio is
+// ready, and the next one is made while the current one plays (no wait for the whole answer).
+function splitSpeech(text) {
+  const parts = String(text).match(/[^.!?؟…\n]+[.!?؟…]*["»)]*\s*|\n+/g) || [String(text)];
+  const out = []; let cur = '';
+  for (const p of parts) { cur += p; if (cur.trim().length >= (out.length ? 90 : 30)) { out.push(cur.trim()); cur = ''; } }
+  const rest = cur.trim();
+  if (rest) { if (out.length && rest.length < 25) out[out.length - 1] += ' ' + rest; else out.push(rest); }
+  return out.length ? out : [String(text)];
+}
+function playWav(b64audio) {
+  return new Promise((resolve, reject) => {
+    const bytes = Uint8Array.from(atob(b64audio), c => c.charCodeAt(0));
     const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
     const a = V.audio = new Audio(url);
     try { // route through an analyser so the orb moves with JARVIS's voice
@@ -252,8 +264,28 @@ async function speakText(text, { thenListen = false } = {}) {
       if (V.out.c.state === 'suspended') V.out.c.resume().catch(() => {});
       if (V.out.c.state === 'running') V.out.c.createMediaElementSource(a).connect(V.out.an); // never route into a stopped context (it would be silent)
     } catch {}
-    a.onended = () => { URL.revokeObjectURL(url); if (V.audio === a) { V.audio = null; afterSpeech(thenListen); } };
-    await a.play();
+    const done = () => { URL.revokeObjectURL(url); if (V.audio === a) V.audio = null; V.audioDone = null; resolve(); };
+    V.audioDone = done; // stopSpeaking() ends the wait too
+    a.onended = done;
+    a.play().catch(e => { URL.revokeObjectURL(url); V.audioDone = null; reject(e); });
+  });
+}
+async function speakText(text, { thenListen = false } = {}) {
+  if (!text || settings().voiceSpeak === false) { afterSpeech(thenListen); return; }
+  setState('speaking');
+  const tok = V.speakTok = {}, chunks = splitSpeech(text);
+  const still = () => V.state === 'speaking' && V.speakTok === tok;
+  const tts = s => { const p = api('/voice/tts', { body: { text: s } }); p.catch(() => {}); return p; };
+  try {
+    let next = tts(chunks[0]);
+    for (let i = 0; i < chunks.length; i++) {
+      const r = await next;
+      if (!still()) return;
+      next = i + 1 < chunks.length ? tts(chunks[i + 1]) : null; // made while this one plays
+      await playWav(r.audio);
+      if (!still()) return;
+    }
+    afterSpeech(thenListen);
   } catch (e) {
     // free voice still downloading: say it once, quietly, and keep answering in text
     if (/هنوز دانلود نشده/.test(e.message)) { if (!V.ttsNoted) { V.ttsNoted = true; setHint(e.message); } }
@@ -262,7 +294,7 @@ async function speakText(text, { thenListen = false } = {}) {
     afterSpeech(thenListen);
   }
 }
-function stopSpeaking() { if (V.audio) { V.audio.pause(); V.audio = null; } }
+function stopSpeaking() { V.speakTok = null; if (V.audio) { V.audio.pause(); V.audio = null; } if (V.audioDone) V.audioDone(); }
 // after an answer: back to waiting for «جارویس» / «هی جارویس». Only when JARVIS asked something
 // (yes/no, «منظورتان X بود؟») it listens a few seconds for the answer without the wake word.
 function afterSpeech(listen) {

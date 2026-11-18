@@ -162,6 +162,11 @@ if (!app.requestSingleInstanceLock()) {
       wc.setWindowOpenHandler(({ url }) => { openOutside(url); return { action: 'deny' }; });
     });
     win.webContents.on('render-process-gone', (_e, d) => log('renderer gone', JSON.stringify(d)));
+    // the panel keeps running in the tray (for "Hey JARVIS"), so tell it when nobody can see it:
+    // animations and timers pause, only the microphone keeps working
+    const vis = v => { if (!win.isDestroyed()) win.webContents.send('jarvis:visible', v); };
+    win.on('hide', () => vis(false)); win.on('minimize', () => vis(false));
+    win.on('show', () => vis(!win.isMinimized())); win.on('restore', () => vis(true));
 
     // Closing while agents work: ask first; then stop them cleanly.
     win.on('close', e => {

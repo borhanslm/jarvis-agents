@@ -64,6 +64,17 @@ function show(id) {
   else { stopTimers(); core && core.pause(); }
 }
 window.showSection = show;
+// Nobody can see the panel (in the tray or minimized): pause every animation, the HUD and the
+// clocks. Only the microphone keeps listening for "Hey JARVIS". Everything resumes on show.
+let winVisible = true;
+function applyVisibility() {
+  const v = winVisible && !document.hidden;
+  document.documentElement.classList.toggle('jv-paused', !v);
+  if (current !== 'cc') return;
+  if (v) { startTimers(); core && core.resume(); } else { stopTimers(); core && core.pause(); }
+}
+document.addEventListener('visibilitychange', applyVisibility);
+if (window.jarvisDesktop && window.jarvisDesktop.onVisible) window.jarvisDesktop.onVisible(v => { winVisible = v; applyVisibility(); });
 // rebuild the rail (e.g. seller mode switched on or off)
 window.rebuildRail = () => {
   const old = $('#rail'); if (!old) return;

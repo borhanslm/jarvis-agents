@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('jarvisDesktop', {
   toggleFullscreen: () => ipcRenderer.send('jarvis:win', 'toggle-full'),
   close: () => ipcRenderer.send('jarvis:win', 'close'),
   windowState: () => ipcRenderer.invoke('jarvis:win-state'),
+  onVisible: cb => ipcRenderer.on('jarvis:visible', (_e, v) => cb(!!v)),
   onWindowState: cb => ipcRenderer.on('jarvis:win-state', (_e, s) => cb({ maximized: !!(s && s.maximized), fullscreen: !!(s && s.fullscreen) })),
   // JARVIS on a TV / second monitor ("stage"): a draw-only full-screen window on another display
   displays: () => ipcRenderer.invoke('jarvis:displays'),
