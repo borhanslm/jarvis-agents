@@ -20,6 +20,18 @@ function qrSvg(text) {
   return `<svg class="ph-qr" viewBox="0 0 ${n + 8} ${n + 8}" role="img" aria-label="QR جفت‌سازی"><rect width="100%" height="100%" fill="#fff"/><path d="${cells.join('')}" fill="#000"/></svg>`;
 }
 
+// «دانلود اپ»: the APK from the public download repo (QR to scan with the phone's camera)
+function dlCard(a) {
+  if (!a) return '';
+  return `<section class="sl-card ph-dl"><h2>${ic('download', 'sm')}دانلود اپ اندروید</h2>
+    <div class="ph-qr-wrap">${qrSvg(a.apk).replace('QR جفت‌سازی', 'QR دانلود اپ')}<div>
+      <p class="help">با دوربین گوشی این QR را اسکن کنید تا فایل نصب (APK) دانلود شود، یا لینک را روی گوشی باز کنید. اگر اندروید پرسید، «نصب از منابع ناشناخته» را اجازه دهید.</p>
+      <div class="row-gap"><a class="btn btn-primary" href="${esc(a.apk)}" target="_blank" rel="noopener">${ic('download', 'sm')}دانلود APK</a>
+        <a class="btn" href="${esc(a.repo)}" target="_blank" rel="noopener">${ic('external-link', 'sm')}صفحه‌ی اپ در GitHub</a>
+        <button type="button" class="btn ghost" id="phDlCopy">${ic('copy', 'sm')}کپی لینک</button></div>
+      <p class="help ph-dl-note">${ic('key-round', 'sm')} دانلود رایگان است؛ استفاده از اپ لایسنس می‌خواهد (هر لایسنس برای یک گوشی، با یک سال آپدیت). خرید از داخل خود اپ، صفحه‌ی فعال‌سازی.</p>
+    </div></div></section>`;
+}
 function render() {
   const s = P.st, on = s.on;
   P.el.innerHTML = `<div class="pg ph-page">
@@ -27,6 +39,7 @@ function render() {
       <p class="help">اپ اندروید جارویس از این‌جا به کامپیوترتان وصل می‌شود: مرکز فرمان، چت، تسک‌ها و صدا روی گوشی. سرور لازم نیست.</p></div>
       <label class="set-tile ph-switch ${on ? 'on' : ''}"><span class="set-tile-ic">${ic('wifi')}</span><b>اتصال گوشی</b><span class="help">${on ? 'روشن · پورت ' + faN(s.port) : 'خاموش'}</span>
         <span class="switch big"><input type="checkbox" id="phOn" ${on ? 'checked' : ''} aria-label="اتصال گوشی"><span></span></span></label></header>
+    ${dlCard(s.android)}
     ${!on ? `<div class="tk-empty">${ic('smartphone')}<h3>اتصال گوشی خاموش است</h3><p class="help">روشنش کنید تا گوشی‌هایی که با QR جفت می‌کنید بتوانند وصل شوند. فقط گوشی‌های جفت‌شده دسترسی دارند و تنظیمات، کلیدها و فروش هرگز از گوشی در دسترس نیستند.<br>ویندوز یک بار اجازه‌ی شبکه می‌پرسد: «شبکه‌ی خصوصی» را تأیید کنید.</p></div>` : `
     <div class="sl-grid">
       <section class="sl-card ph-pair">
@@ -50,6 +63,7 @@ function render() {
       <button type="button" class="btn btn-sm ghost danger" data-revoke="${esc(d.id)}">${ic('x', 'sm')}لغو دسترسی</button></div>`).join('')}</div>` : '<p class="help">هنوز گوشی‌ای جفت نشده.</p>'}`}
   </div>`;
   const sw = $('#phOn'); sw.onchange = async () => { try { P.st = await api('/mobile/enable', { body: { on: sw.checked } }); P.pair = null; render(); } catch (e) { window.toast(e.message, true); } };
+  const dc = $('#phDlCopy'); if (dc) dc.onclick = async () => { try { await navigator.clipboard.writeText(P.st.android.apk); window.toast('لینک دانلود کپی شد'); } catch { window.toast('کپی نشد', true); } };
   const pb = $('#phPair'); if (pb) pb.onclick = async () => { try { P.pair = await api('/mobile/pair', { body: {} }); render(); } catch (e) { window.toast(e.message, true); } };
   P.el.querySelectorAll('[data-revoke]').forEach(b => b.onclick = async () => { if (!confirm('دسترسی این گوشی قطع شود؟ برای استفاده‌ی دوباره باید دوباره جفت شود.')) return; P.st = await api('/mobile/devices/' + b.dataset.revoke, { method: 'DELETE' }); render(); });
   clearInterval(P.timer);

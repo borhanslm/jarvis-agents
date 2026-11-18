@@ -1,7 +1,7 @@
 {
   "name": "jarvis-agents",
   "productName": "JARVIS",
-  "version": "1.4.6",
+  "version": "1.4.7",
   "description": "JARVIS — a local desktop app where Claude builds and Codex tests your code",
   "author": "JARVIS",
   "main": "desktop/main.js",
@@ -23,7 +23,8 @@
   "license": "MIT",
   "jarvis": {
     "allowClaudeAiLogin": false,
-    "clubUrl": "https://club.maxping.ir"
+    "clubUrl": "https://club.maxping.ir",
+    "androidApp": "borhanslm/jarvis-android-app"
   },
   "devDependencies": {
     "electron": "^33.2.1",

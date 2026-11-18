@@ -1516,7 +1516,11 @@ ${prefs ? 'What you know about the user:\n' + prefs + '\n' : ''}Answer with ONLY
   }
   if (parts[0] === 'mobile') {
     try {
-      if (parts[1] === 'status' && m === 'GET') return send(res, 200, mobile.status());
+      if (parts[1] === 'status' && m === 'GET') {
+        // where the Android app is downloaded from (public repo with APKs only; using it needs a license)
+        const repo = String((require('./package.json').jarvis || {}).androidApp || '').trim();
+        return send(res, 200, { ...mobile.status(), android: /^[\w.-]+\/[\w.-]+$/.test(repo) ? { repo: `https://github.com/${repo}`, apk: `https://github.com/${repo}/releases/latest/download/JARVIS-Android.apk` } : null });
+      }
       if (parts[1] === 'enable' && m === 'POST') { store.updateSettings({ mobileEnabled: !!body.on }); await syncMobile(); return send(res, 200, mobile.status()); }
       if (parts[1] === 'pair' && m === 'POST') return send(res, 200, mobile.startPairing());
       if (parts[1] === 'devices' && parts[2] && m === 'DELETE') { mobile.revoke(parts[2]); return send(res, 200, mobile.status()); }
