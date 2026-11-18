@@ -27,7 +27,7 @@ function gate() {
   document.documentElement.classList.add('club-locked');
   if (!g) { g = document.createElement('div'); g.id = 'clubGate'; g.className = 'cg'; g.setAttribute('role', 'dialog'); g.setAttribute('aria-modal', 'true'); g.setAttribute('aria-labelledby', 'cgTitle'); document.body.appendChild(g); }
   if (C.pending) return gateCode(g);
-  const reg = C.gateMode === 'register';
+  const reg = C.gateMode === 'register', byCode = !reg && C.loginWith === 'code';
   g.innerHTML = `<div class="cg-box">
     <img src="logo.svg" alt="" class="cg-logo" width="64" height="64">
     <h1 id="cgTitle">باشگاه جارویس</h1>
@@ -40,13 +40,15 @@ function gate() {
       ${reg ? `<div class="field"><label for="cgName">نام</label><input id="cgName" autocomplete="name" required maxlength="60"></div>` : ''}
       <div class="field"><label for="cgEmail">ایمیل</label><input id="cgEmail" type="email" dir="ltr" autocomplete="email" required value="${esc(C.st.user ? C.st.user.email : '')}"></div>
       ${reg ? `<div class="field"><label for="cgPhone">شماره‌ی موبایل <span class="help">(اختیاری)</span></label><input id="cgPhone" type="tel" dir="ltr" autocomplete="tel" maxlength="16"></div>` : ''}
-      <div class="field"><label for="cgPass">رمز ${reg ? '<span class="help">(دست‌کم ۸ کاراکتر)</span>' : ''}</label><input id="cgPass" type="password" dir="ltr" autocomplete="${reg ? 'new-password' : 'current-password'}" required minlength="${reg ? 8 : 1}"></div>
+      ${byCode ? '' : `<div class="field"><label for="cgPass">رمز ${reg ? '<span class="help">(دست‌کم ۸ کاراکتر)</span>' : ''}</label><input id="cgPass" type="password" dir="ltr" autocomplete="${reg ? 'new-password' : 'current-password'}" required minlength="${reg ? 8 : 1}"></div>`}
       <div id="cgErr" class="bad" role="alert"></div>
-      <button type="submit" class="btn btn-primary cg-go">${reg ? 'ساخت حساب و ورود' : 'ورود'}</button>
+      <button type="submit" class="btn btn-primary cg-go">${reg ? 'ساخت حساب و ورود' : byCode ? 'ارسال کد به ایمیل' : 'ورود'}</button>
     </form>
+    ${reg ? '' : `<button type="button" class="btn btn-sm ghost cg-alt" id="cgWith">${byCode ? `${ic('key-round', 'sm')}ورود با رمز` : `${ic('mail', 'sm')}ورود با کد ایمیل (بدون رمز)`}</button>`}
     ${reg ? `<p class="help cg-note">${ic('lock', 'sm')} فقط نام، ایمیل و در صورت تمایل شماره‌ی موبایل ذخیره می‌شود. رمز به‌صورت هش‌شده نگه داشته می‌شود و هر وقت بخواهید می‌توانید حسابتان را کامل پاک کنید.</p>` : ''}
   </div>`;
   g.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { C.gateMode = b.dataset.mode; gate(); });
+  const alt = g.querySelector('#cgWith'); if (alt) alt.onclick = () => { const e = (g.querySelector('#cgEmail') || {}).value; C.loginWith = byCode ? 'pass' : 'code'; gate(); if (e) g.querySelector('#cgEmail').value = e; };
   const f = g.querySelector('#cgForm');
   f.onsubmit = async e => {
     e.preventDefault();
@@ -55,13 +57,14 @@ function gate() {
     err.textContent = ''; go.disabled = true; go.textContent = 'لطفاً صبر کنید…';
     try {
       const r = reg ? await api('/club/register', { body: { name: v('cgName'), email: v('cgEmail'), phone: v('cgPhone'), password: v('cgPass') } })
+                 : byCode ? await api('/club/login-code', { body: { email: v('cgEmail') } })
                  : await api('/club/login', { body: { email: v('cgEmail'), password: v('cgPass') } });
       if (r.pending) { C.pending = { ...r.pending, at: Date.now() }; gate(); return; } // step 2: the code from the email
       C.st = r; window.JARVIS_CLUB = C.st; gate(); toast('خوش آمدید، ' + (C.st.user ? C.st.user.name : ''));
       if (window.rebuildRail) window.rebuildRail();
-    } catch (x) { err.textContent = x.message; go.disabled = false; go.textContent = reg ? 'ساخت حساب و ورود' : 'ورود'; }
+    } catch (x) { err.textContent = x.message; go.disabled = false; go.textContent = reg ? 'ساخت حساب و ورود' : byCode ? 'ارسال کد به ایمیل' : 'ورود'; }
   };
-  setTimeout(() => { const first = g.querySelector(reg ? '#cgName' : '#cgEmail'); if (first && !first.value) first.focus(); else g.querySelector('#cgPass').focus(); });
+  setTimeout(() => { const first = g.querySelector(reg ? '#cgName' : '#cgEmail'); if (first && !first.value) first.focus(); else (g.querySelector('#cgPass') || first).focus(); });
 }
 // step 2 of sign-up / login: the 6-digit code sent to the email
 function gateCode(g) {

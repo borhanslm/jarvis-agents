@@ -217,9 +217,19 @@ route('POST', '/api/login', async ({ db, b, env }) => {
   if (!u || !(await checkPass(String(b.password || ''), u.pass))) fail(401, 'ایمیل یا رمز اشتباه است');
   if (u.status === 'blocked') fail(403, 'حساب شما مسدود شده است');
   await unthrottle(db, 'login:' + email);
+  return finishLogin(db, env, u, client(b.client));
+});
+// login without a password: a code sent to the member's email (the other way to sign in)
+route('POST', '/api/login/code', async ({ db, b, env }) => {
+  const email = normEmail(b.email);
+  if (!okEmail(email)) fail(400, 'ایمیل درست نیست');
+  await throttle(db, 'logincode:' + email, 10, 36e5);
+  const u = await db.prepare('SELECT id, status FROM users WHERE email = ?').bind(email).first();
+  if (!u) fail(404, 'با این ایمیل حسابی نیست؛ اول عضو شوید');
+  if (u.status === 'blocked') fail(403, 'حساب شما مسدود شده است');
   const conf = await mailConf(db, env);
-  if (conf) return sendCode(db, env, conf, email, 'login', { client: client(b.client) }); // step 2: the code from the email
-  return finishLogin(db, env, u, client(b.client)); // email not set up yet: the password alone (nobody is locked out)
+  if (!conf) fail(503, 'ورود با کد ایمیلی هنوز فعال نیست؛ با رمز وارد شوید');
+  return sendCode(db, env, conf, email, 'login', { client: client(b.client) });
 });
 route('POST', '/api/login/verify', async ({ db, b, env }) => {
   const email = normEmail(b.email);

@@ -35,12 +35,15 @@ test('club email codes', async t => {
     assert.equal((await call('POST', '/api/register/verify', { email: 'ali@example.com', code })).status, 400, 'a code works once');
   });
 
-  await t.test('login: password first, then the code; 5 wrong codes burn it', async () => {
+  await t.test('login: with the password alone, or without it by an email code; 5 wrong codes burn it', async () => {
     const { call } = mk({ DEV_MAIL: '1' });
     await call('POST', '/api/register', { email: 'sara@example.com', name: 'سارا', password: 'sara-pass-1' });
     await call('POST', '/api/register/verify', { email: 'sara@example.com', code: W.devOutbox.get('sara@example.com') });
     assert.equal((await call('POST', '/api/login', { email: 'sara@example.com', password: 'wrong-pass' })).status, 401);
-    const s1 = await call('POST', '/api/login', { email: 'sara@example.com', password: 'sara-pass-1' });
+    const pw = await call('POST', '/api/login', { email: 'sara@example.com', password: 'sara-pass-1' });
+    assert.equal(pw.status, 200); assert.match(pw.d.token, /^jc_/, 'the password alone signs in');
+    assert.equal((await call('POST', '/api/login/code', { email: 'nobody@example.com' })).status, 404);
+    const s1 = await call('POST', '/api/login/code', { email: 'Sara@Example.com' });
     assert.equal(s1.status, 200); assert.equal(s1.d.needCode, true); assert.equal(s1.d.purpose, 'login'); assert.ok(!s1.d.token);
     const code = W.devOutbox.get('sara@example.com'), bad = code === '123456' ? '654321' : '123456';
     for (let i = 0; i < 5; i++) assert.equal((await call('POST', '/api/login/verify', { email: 'sara@example.com', code: bad })).status, 400);
@@ -82,7 +85,8 @@ test('club email codes', async t => {
     const a = await call('POST', '/api/register', { email: 'boss@example.com', name: 'مدیر', password: 'boss-pass-1' });
     assert.equal(a.status, 200); assert.equal(a.d.user.role, 'admin');
     const l = await call('POST', '/api/login', { email: 'boss@example.com', password: 'boss-pass-1' });
-    assert.equal(l.status, 200); assert.ok(l.d.token, 'no lock-out while email is not set up');
+    assert.equal(l.status, 200); assert.ok(l.d.token, 'the password signs in');
+    assert.equal((await call('POST', '/api/login/code', { email: 'boss@example.com' })).status, 503, 'no code login before email is set up');
     // admin settings: the key is checked, stored, never sent back
     assert.equal((await call('GET', '/api/admin/mail', null, a.d.token)).d.configured, false);
     assert.equal((await call('PUT', '/api/admin/mail', { apiKey: 'bad', from: 'me@example.com' }, a.d.token)).status, 400);
@@ -96,7 +100,7 @@ test('club email codes', async t => {
     const realFetch = globalThis.fetch; let sent = null;
     globalThis.fetch = async (url, o) => { sent = { url, body: JSON.parse(o.body), key: o.headers['api-key'] }; return new Response('{}', { status: 201 }); };
     try {
-      const l2 = await call('POST', '/api/login', { email: 'boss@example.com', password: 'boss-pass-1' });
+      const l2 = await call('POST', '/api/login/code', { email: 'boss@example.com' });
       assert.equal(l2.status, 200); assert.equal(l2.d.needCode, true);
       assert.equal(sent.url, 'https://api.brevo.com/v3/smtp/email'); assert.equal(sent.key, key);
       assert.equal(sent.body.to[0].email, 'boss@example.com'); assert.equal(sent.body.sender.email, 'me@example.com');

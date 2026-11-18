@@ -142,6 +142,74 @@ const ollama = new Ollama({ onProgress: (name, st) => broadcast({ type: 'ollamaP
 const llmDeps = () => ({ providers, anthropicKey: setup.secrets.get('anthropicApiKey'), ollamaBase: ollama.base });
 // Voice connection mode: 'offline' never sends anything out; 'online' always uses online services;
 // 'auto' uses them while the internet is reachable and switches to the local ones when it is not.
+// ---- one voice turn (computer panel, phone, Telegram all use these) ----
+async function voiceStt(s, body) {
+  let wav = Buffer.from(String(body.audio || ''), 'base64');
+  if (body.format && body.format !== 'wav' && wav.length > 100) { if (!media.ready()) throw new Error('برای صدای گوشی، FFmpeg را از تنظیمات صدا دانلود کنید'); wav = await media.toWav16k(wav); }
+  if (wav.length < 1000) throw new Error('صدایی ضبط نشد');
+  // the panel's Persian wake-word check may only ever use the local engine
+  const offline = body.engine === 'local' || !(await voiceOnline(s));
+  // the wake-word check stays plain; real requests get the learned words as a hint, then the learned fixes
+  const plain = body.engine === 'local';
+  const out = await speech.transcribe(wav, { engine: plain ? 'local' : s.voiceStt, offline, lang: ['fa', 'en'].includes(body.lang) ? body.lang : s.voiceLang, hint: plain ? '' : sttHint() });
+  if (!plain && out.text) { const f = lexicon.apply(out.text); if (f.fixed.length) Object.assign(out, { heard: out.text, text: f.text, fixed: f.fixed }); }
+  return out;
+}
+async function voiceAsk(s, body) {
+  const text = String(body.text || '').trim().slice(0, 2000);
+  const on = await voiceOnline(s);
+  const off = offlineSpec(s);
+  let spec = on ? (s.voiceModel || 'claude-haiku-5-5') : off;
+  if (!spec) throw new Error('اینترنت در دسترس نیست و مغز آفلاین انتخاب نشده. در تنظیمات صدا یک مدل Ollama انتخاب کنید.');
+  let r;
+  // asked on the phone: phone actions run there; asked on the computer with a paired phone: they are sent to it
+  const phoneMode = body.phone ? true : (s.mobileEnabled && mobile.list().length ? 'remote' : false);
+  try { r = await brain.handle(text, { spec, phone: phoneMode }); }
+  catch (e) {
+    // the online model could not be reached: answer with the offline one (not when the user chose "online only")
+    if (!on || s.voiceMode === 'online' || !off || !net.isNetError(e)) throw e;
+    net.markOffline(); spec = off; r = await brain.handle(text, { spec, phone: phoneMode });
+  }
+  r.brain = { spec, offline: spec === off };
+  let result;
+  if (r.action && /^phone_/.test(r.action.type) && !body.phone) result = auditMod.allowed(s, r.action.type) ? (audit.log('voice', r.action.type, r.action.params), sendToPhone(r.action, text)) : { ok: false, error: 'این کار در «مجوزها و گزارش» خاموش است' };
+  else result = r.confirm ? null : await voiceAct(r.action, body.phone ? 'phone' : 'voice');
+  // a question that needs a yes: show it on the phone too, so it can be answered there
+  if (r.confirm && !body.phone) broadcast({ type: 'confirmRequest', say: r.say, action: r.action, at: Date.now() });
+  voiceLog.push({ ts: Date.now(), user: text, say: r.say, action: r.action, confirm: r.confirm, result });
+  if (!r.guess && !(r.action && ['remember', 'forget'].includes(r.action.type))) learnFrom(text, r.say || '', spec);
+  if (voiceLog.length > 200) voiceLog.splice(0, voiceLog.length - 200);
+  return { ...r, result };
+}
+// an answer spoken sentence by sentence: the first one is made right away, the rest when asked for
+function splitSpeech(text) {
+  const parts = String(text).match(/[^.!?؟…\n]+[.!?؟…]*["»)]*\s*|\n+/g) || [String(text)];
+  const out = []; let cur = '';
+  for (const p of parts) { cur += p; if (cur.trim().length >= (out.length ? 90 : 30)) { out.push(cur.trim()); cur = ''; } }
+  const rest = cur.trim();
+  if (rest) { if (out.length && rest.length < 25) out[out.length - 1] += ' ' + rest; else out.push(rest); }
+  return out.length ? out : [String(text)];
+}
+async function voiceTurn(s, body) {
+  const timing = {}, t0 = Date.now();
+  let text = String(body.text || '').trim(), stt = null;
+  if (!text) {
+    stt = await voiceStt(s, body); timing.stt = Date.now() - t0;
+    text = String(stt.text || '').trim();
+    if (text.replace(/[\s.,!?؟،]/g, '').length < 2) return { heard: '', empty: true, timing };
+  }
+  const t1 = Date.now();
+  const r = await voiceAsk(s, { text, phone: body.phone });
+  timing.think = Date.now() - t1;
+  let speechOut = null;
+  if (body.speak && r.say) {
+    const parts = splitSpeech(r.say), t2 = Date.now();
+    try { const a = await speech.speak(parts[0].slice(0, 2000), { engine: s.voiceTts, offline: !(await voiceOnline(s)), prefs: voicePrefs(s) }); speechOut = { audio: a.wav.toString('base64'), rest: parts.slice(1) }; }
+    catch (e) { speechOut = { error: e.message, rest: parts }; }
+    timing.tts = Date.now() - t2;
+  }
+  return { ...r, heard: text, ...(stt && stt.fixed ? { fixed: stt.fixed, heardRaw: stt.heard } : {}), speech: speechOut, timing };
+}
 async function voiceOnline(s) {
   const mode = s.voiceMode || 'auto';
   if (mode === 'offline') return false;
@@ -1459,6 +1527,7 @@ ${prefs ? 'What you know about the user:\n' + prefs + '\n' : ''}Answer with ONLY
       if (!parts[1] && m === 'GET') return send(res, 200, clubView());
       if (parts[1] === 'login' && m === 'POST') { const st = await club.login(body); if (!st.pending) clubBroadcast(); return send(res, 200, st); }
       if (parts[1] === 'register' && m === 'POST') { const st = await club.register(body); if (!st.pending) clubBroadcast(); return send(res, 200, st); }
+      if (parts[1] === 'login-code' && m === 'POST') return send(res, 200, await club.loginCode(body));
       if (parts[1] === 'verify' && m === 'POST') { const st = await club.verify(body); clubBroadcast(); return send(res, 200, st); }
       if (parts[1] === 'resend' && m === 'POST') return send(res, 200, await club.resend(body));
       if (parts[1] === 'logout' && m === 'POST') { const st = await club.logout(); clubBroadcast(); return send(res, 200, st); }
@@ -1638,18 +1707,9 @@ ${prefs ? 'What you know about the user:\n' + prefs + '\n' : ''}Answer with ONLY
         res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'max-age=86400' });
         return fs.createReadStream(f).pipe(res);
       }
-      if (parts[1] === 'stt' && m === 'POST') {
-        let wav = Buffer.from(String(body.audio || ''), 'base64');
-        if (body.format && body.format !== 'wav' && wav.length > 100) { if (!media.ready()) return send(res, 400, { error: 'برای صدای گوشی، FFmpeg را از تنظیمات صدا دانلود کنید' }); wav = await media.toWav16k(wav); }
-        if (wav.length < 1000) return send(res, 400, { error: 'صدایی ضبط نشد' });
-        // the panel's Persian wake-word check may only ever use the local engine
-        const offline = body.engine === 'local' || !(await voiceOnline(s));
-        // the wake-word check stays plain; real requests get the learned words as a hint, then the learned fixes
-        const plain = body.engine === 'local';
-        const out = await speech.transcribe(wav, { engine: plain ? 'local' : s.voiceStt, offline, lang: ['fa', 'en'].includes(body.lang) ? body.lang : s.voiceLang, hint: plain ? '' : sttHint() });
-        if (!plain && out.text) { const f = lexicon.apply(out.text); if (f.fixed.length) Object.assign(out, { heard: out.text, text: f.text, fixed: f.fixed }); }
-        return send(res, 200, out);
-      }
+      if (parts[1] === 'stt' && m === 'POST') return send(res, 200, await voiceStt(s, body));
+      // the phone in one round trip: its recording -> words -> answer (+ action) -> the first sentence spoken
+      if (parts[1] === 'turn' && m === 'POST') return send(res, 200, await voiceTurn(s, body));
       if (parts[1] === 'engines' && m === 'GET') return send(res, 200, voiceEngines());
       // words JARVIS learned from its hearing mistakes (see and forget them in the JARVIS settings)
       if (parts[1] === 'lexicon' && m === 'GET') return send(res, 200, { corrections: lexicon.all() });
@@ -1679,32 +1739,7 @@ ${prefs ? 'What you know about the user:\n' + prefs + '\n' : ''}Answer with ONLY
         const r = await speech.speak(String(body.text || '').slice(0, 2000), { engine: s.voiceTts, offline: !(await voiceOnline(s)), prefs: voicePrefs(s) });
         return send(res, 200, { audio: r.wav.toString('base64'), ms: r.ms, engine: r.engine });
       }
-      if (parts[1] === 'ask' && m === 'POST') {
-        const text = String(body.text || '').trim().slice(0, 2000);
-        const on = await voiceOnline(s);
-        const off = offlineSpec(s);
-        let spec = on ? (s.voiceModel || 'claude-haiku-5-5') : off;
-        if (!spec) throw new Error('اینترنت در دسترس نیست و مغز آفلاین انتخاب نشده. در تنظیمات صدا یک مدل Ollama انتخاب کنید.');
-        let r;
-        // asked on the phone: phone actions run there; asked on the computer with a paired phone: they are sent to it
-        const phoneMode = body.phone ? true : (s.mobileEnabled && mobile.list().length ? 'remote' : false);
-        try { r = await brain.handle(text, { spec, phone: phoneMode }); }
-        catch (e) {
-          // the online model could not be reached: answer with the offline one (not when the user chose "online only")
-          if (!on || s.voiceMode === 'online' || !off || !net.isNetError(e)) throw e;
-          net.markOffline(); spec = off; r = await brain.handle(text, { spec, phone: phoneMode });
-        }
-        r.brain = { spec, offline: spec === off };
-        let result;
-        if (r.action && /^phone_/.test(r.action.type) && !body.phone) result = auditMod.allowed(s, r.action.type) ? (audit.log('voice', r.action.type, r.action.params), sendToPhone(r.action, text)) : { ok: false, error: 'این کار در «مجوزها و گزارش» خاموش است' };
-        else result = r.confirm ? null : await voiceAct(r.action, body.phone ? 'phone' : 'voice');
-        // a question that needs a yes: show it on the phone too, so it can be answered there
-        if (r.confirm && !body.phone) broadcast({ type: 'confirmRequest', say: r.say, action: r.action, at: Date.now() });
-        voiceLog.push({ ts: Date.now(), user: text, say: r.say, action: r.action, confirm: r.confirm, result });
-        if (!r.guess && !(r.action && ['remember', 'forget'].includes(r.action.type))) learnFrom(text, r.say || '', spec);
-        if (voiceLog.length > 200) voiceLog.splice(0, voiceLog.length - 200);
-        return send(res, 200, { ...r, result });
-      }
+      if (parts[1] === 'ask' && m === 'POST') return send(res, 200, await voiceAsk(s, body));
       // the phone's app agent: one planning step with the voice model (reads a screen, picks the next tap)
       if (parts[1] === 'plan' && m === 'POST') {
         const on = await voiceOnline(s), spec = on ? (s.voiceModel || 'claude-haiku-5-5') : offlineSpec(s);
