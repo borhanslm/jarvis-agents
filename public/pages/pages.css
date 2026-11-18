@@ -498,3 +498,5 @@ html.is-full body.on-jarvis .page-view { grid-column: 1 / -1; }
 html.is-full body.on-jarvis .jv { border-radius: 0; }
 /* the top bar is hidden on the JARVIS page, so the page gets its height back (the bottom bar was cut off) */
 body.on-jarvis .layout { height: 100%; padding-bottom: 0; }
+
+.v-log .vl.time, .jv-msg.time { color: var(--color-fg-muted); font-size: var(--text-xs); opacity: .85; }

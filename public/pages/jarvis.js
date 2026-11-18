@@ -79,9 +79,9 @@ function drawLog() {
   if (!P.el) return;
   const log = (V().log || []).slice(-40);
   const box = $('#jvLog', P.el);
-  box.innerHTML = log.length ? log.map(l => `<div class="jv-msg ${l.who}"><b>${l.who === 'user' ? 'شما' : l.who === 'jarvis' ? 'جارویس' : 'خطا'}</b><span dir="auto">${esc(l.text)}</span></div>`).join('') : '<p class="help">هنوز گفتگویی نشده.</p>';
+  box.innerHTML = log.length ? log.map(l => `<div class="jv-msg ${l.who}"><b>${l.who === 'user' ? 'شما' : l.who === 'jarvis' ? 'جارویس' : l.who === 'time' ? 'زمان' : 'خطا'}</b><span dir="auto">${esc(l.text)}</span></div>`).join('') : '<p class="help">هنوز گفتگویی نشده.</p>';
   box.scrollTop = box.scrollHeight;
-  const last = log.filter(l => l.who !== 'error').slice(-1)[0];
+  const last = log.filter(l => l.who !== 'error' && l.who !== 'time').slice(-1)[0];
   $('#jvCaption', P.el).textContent = last ? last.text : '';
 }
 window.addEventListener('jarvis:voice', status);

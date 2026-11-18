@@ -116,10 +116,15 @@ function onChunk(c) {
   } else if (V.state === 'recording') {
     V.buf.push(c);
     V.recMs += 80;
-    if (loud) { V.speechMs += 80; V.silenceMs = 0; if (V.speechMs >= 160) V.heardSpeech = true; } else V.silenceMs += 80;
-    const quietEnd = V.heardSpeech && V.silenceMs >= 900;
+    // "quiet" = clearly below how loud YOU were speaking, not only below a fixed level: with a fan,
+    // TV or echo in the room the fixed level is never reached and it used to record for 25 s
+    if (loud) V.peak = Math.max(V.peak * 0.995, level);
+    const speaking = loud && !(V.heardSpeech && level < V.peak * 0.22);
+    if (speaking) { V.speechMs += 80; V.silenceMs = 0; if (V.speechMs >= 160) { if (!V.heardSpeech) V.speechAt = V.recMs; V.heardSpeech = true; } } else V.silenceMs += 80;
+    const quietEnd = V.heardSpeech && V.silenceMs >= 800;
     const nothing = !V.heardSpeech && V.recMs >= (V.followUp ? 5000 : 7000);
-    if (quietEnd || V.recMs >= (V.gpu || !V.localStt ? 25000 : 10000)) finishRecording(); // the local CPU model hears at most 10 s at once
+    const tooLong = V.heardSpeech && V.recMs - V.speechAt >= 9000; // a voice command is short
+    if (quietEnd || tooLong || V.recMs >= (V.gpu || !V.localStt ? 15000 : 10000)) finishRecording(); // the local CPU model hears at most 10 s at once
     else if (nothing) { V.followUp = false; setState('idle', V.followUp ? '' : 'چیزی نشنیدم.'); }
   }
 }
@@ -179,17 +184,20 @@ async function prepareYes() {
 function startRecording(followUp) {
   stopSpeaking();
   V.buf = followUp ? [] : V.pre.slice(-4); V.pre = [];
-  V.speechMs = 0; V.silenceMs = 0; V.recMs = 0; V.heardSpeech = false; V.followUp = !!followUp;
+  V.speechMs = 0; V.silenceMs = 0; V.recMs = 0; V.heardSpeech = false; V.followUp = !!followUp; V.peak = 0; V.speechAt = 0;
   setState('recording');
 }
 async function finishRecording() {
   const samples = concat(V.buf); V.buf = [];
   setState('thinking', 'در حال شنیدن…');
+  V.t = { rec: samples.length / 16000 };
   try {
+    const t0 = performance.now();
     const r = await stt(samples);
+    V.t.stt = (performance.now() - t0) / 1000;
     if (!r.text || r.text.replace(/[\s.,!?؟،]/g, '').length < 2) { setState('idle', 'متوجه نشدم.'); return; }
     addLog('user', r.text);
-    await ask(r.text);
+    await ask(r.text, true);
   } catch (e) { setState('idle'); addLog('error', e.message); }
 }
 
@@ -206,10 +214,12 @@ const b64 = u8 => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s +=
 const concat = arr => { const n = arr.reduce((t, a) => t + a.length, 0), o = new Float32Array(n); let p = 0; for (const a of arr) { o.set(a, p); p += a.length; } return o; };
 function stt(samples, engine, lang) { return api('/voice/stt', { body: { audio: b64(wav16(samples)), ...(engine ? { engine } : {}), ...(lang ? { lang } : {}) } }); }
 
-async function ask(text) {
+async function ask(text, fromVoice) {
   setState('thinking', 'در حال فکر کردن…');
+  if (!fromVoice) V.t = {};
   let r;
-  try { r = await api('/voice/ask', { body: { text } }); }
+  const t0 = performance.now();
+  try { r = await api('/voice/ask', { body: { text } }); V.t.think = (performance.now() - t0) / 1000; }
   catch (e) { addLog('error', e.message); setState('idle'); speakText(/[؀-ۿ]/.test(text) ? 'متأسفم، الان نتوانستم جواب بدهم.' : 'Sorry, I could not answer right now.'); return; }
   handleReply(r);
 }
@@ -273,7 +283,7 @@ function playWav(b64audio) {
 async function speakText(text, { thenListen = false } = {}) {
   if (!text || settings().voiceSpeak === false) { afterSpeech(thenListen); return; }
   setState('speaking');
-  const tok = V.speakTok = {}, chunks = splitSpeech(text);
+  const tok = V.speakTok = {}, chunks = splitSpeech(text), tStart = performance.now();
   const still = () => V.state === 'speaking' && V.speakTok === tok;
   const tts = s => { const p = api('/voice/tts', { body: { text: s } }); p.catch(() => {}); return p; };
   try {
@@ -282,6 +292,7 @@ async function speakText(text, { thenListen = false } = {}) {
       const r = await next;
       if (!still()) return;
       next = i + 1 < chunks.length ? tts(chunks[i + 1]) : null; // made while this one plays
+      if (i === 0 && V.t && V.t.think != null) { V.t.voice = (performance.now() - tStart) / 1000; logTimes(); }
       await playWav(r.audio);
       if (!still()) return;
     }
@@ -389,13 +400,20 @@ function meter(level) {
     g.globalAlpha = 1;
   });
 }
+// one line per answer: how long each step took (to see what is slow)
+function logTimes() {
+  const t = V.t || {}, f = x => x == null ? null : (Math.round(x * 10) / 10).toLocaleString('fa-IR');
+  const parts = [t.rec != null && `ضبط ${f(t.rec)}`, t.stt != null && `شنیدن ${f(t.stt)}`, t.think != null && `فکر ${f(t.think)}`, t.voice != null && `ساخت صدا ${f(t.voice)}`].filter(Boolean);
+  if (parts.length) { V.log.push({ who: 'time', text: parts.join(' · ') + ' ثانیه', ts: Date.now() }); window.dispatchEvent(new CustomEvent('jarvis:voicelog', { detail: { who: 'time' } })); }
+  V.t = null;
+}
 function addLog(who, text) {
   V.log.push({ who, text, ts: Date.now() }); if (V.log.length > 100) V.log.shift();
   if (who === 'error') setHint('⚠ ' + text); else setHint(text);
   const l = document.getElementById('vLog'); if (l) l.innerHTML = logHtml();
   window.dispatchEvent(new CustomEvent('jarvis:voicelog', { detail: { who, text } }));
 }
-const logHtml = () => V.log.slice().reverse().map(l => `<div class="vl ${l.who}"><b>${l.who === 'user' ? 'شما' : l.who === 'jarvis' ? 'جارویس' : 'خطا'}</b><span dir="auto">${esc(l.text)}</span></div>`).join('') || '<div class="help">هنوز گفتگویی نشده.</div>';
+const logHtml = () => V.log.slice().reverse().map(l => `<div class="vl ${l.who}"><b>${l.who === 'user' ? 'شما' : l.who === 'jarvis' ? 'جارویس' : l.who === 'time' ? 'زمان' : 'خطا'}</b><span dir="auto">${esc(l.text)}</span></div>`).join('') || '<div class="help">هنوز گفتگویی نشده.</div>';
 
 // ---------- on / off ----------
 async function start(talkNow) {
