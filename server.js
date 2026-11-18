@@ -1457,8 +1457,10 @@ ${prefs ? 'What you know about the user:\n' + prefs + '\n' : ''}Answer with ONLY
   if (parts[0] === 'club') {
     try {
       if (!parts[1] && m === 'GET') return send(res, 200, clubView());
-      if (parts[1] === 'login' && m === 'POST') { const st = await club.login(body); clubBroadcast(); return send(res, 200, st); }
-      if (parts[1] === 'register' && m === 'POST') { const st = await club.register(body); clubBroadcast(); return send(res, 200, st); }
+      if (parts[1] === 'login' && m === 'POST') { const st = await club.login(body); if (!st.pending) clubBroadcast(); return send(res, 200, st); }
+      if (parts[1] === 'register' && m === 'POST') { const st = await club.register(body); if (!st.pending) clubBroadcast(); return send(res, 200, st); }
+      if (parts[1] === 'verify' && m === 'POST') { const st = await club.verify(body); clubBroadcast(); return send(res, 200, st); }
+      if (parts[1] === 'resend' && m === 'POST') return send(res, 200, await club.resend(body));
       if (parts[1] === 'logout' && m === 'POST') { const st = await club.logout(); clubBroadcast(); return send(res, 200, st); }
       if (parts[1] === 'refresh' && m === 'POST') { const st = await club.refresh(); clubBroadcast(); return send(res, 200, st); }
       if (['address', 'cf-login', 'cf-open', 'deploy'].includes(parts[1]) && !clubAdmin()) return send(res, 403, { error: ADMIN_ONLY });

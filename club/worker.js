@@ -24,8 +24,10 @@ export const SCHEMA = [
      status TEXT NOT NULL DEFAULT 'pending', reason TEXT, license_id TEXT, created INTEGER NOT NULL, decided INTEGER)`,
   `CREATE INDEX IF NOT EXISTS purchases_status ON purchases(status)`,
   `CREATE TABLE IF NOT EXISTS shop (k TEXT PRIMARY KEY, v TEXT NOT NULL)`,
+  // email codes: sign-up (the account is made only after the code) and the second step of login
+  `CREATE TABLE IF NOT EXISTS codes (k TEXT PRIMARY KEY, hash TEXT NOT NULL, data TEXT, expires INTEGER NOT NULL, tries INTEGER NOT NULL DEFAULT 0, sent INTEGER NOT NULL)`,
 ];
-export const VERSION = 2;
+export const VERSION = 3;
 const DAY = 864e5;
 const SESSION_DAYS = 180;
 const ITER = 100000; // the Workers PBKDF2 maximum
@@ -73,6 +75,66 @@ async function throttle(db, k, max, windowMs) {
 }
 const unthrottle = (db, k) => db.prepare('DELETE FROM throttle WHERE k = ?').bind(k).run();
 
+// ---- email codes (Brevo) ----
+// The Brevo key comes from a Worker secret (BREVO_API_KEY + MAIL_FROM) or from what the admin saved
+// in JARVIS (shop table, never sent back). Until it is set, nobody is locked out: login works with
+// the password alone and only the admin address can sign up. With DEV_MAIL=1 (local dev server and
+// tests) codes are kept in devOutbox instead of being emailed.
+const CODE_MIN = 10, CODE_TRIES = 5, RESEND_S = 60;
+export const devOutbox = new Map();
+async function mailConf(db, env) {
+  if (env.BREVO_API_KEY && env.MAIL_FROM) return { key: env.BREVO_API_KEY, from: env.MAIL_FROM, name: env.MAIL_FROM_NAME || 'JARVIS', source: 'env' };
+  const r = await db.prepare("SELECT v FROM shop WHERE k = 'mail'").first();
+  if (r) { try { const m = JSON.parse(r.v); if (m.key && m.from) return { ...m, source: 'admin' }; } catch {} }
+  return env.DEV_MAIL === '1' ? { dev: true, from: 'dev@localhost', name: 'JARVIS' } : null;
+}
+const newCode = () => String(crypto.getRandomValues(new Uint32Array(1))[0] % 1e6).padStart(6, '0');
+const PURPOSE = { reg: 'ثبت‌نام', login: 'ورود', test: 'آزمایش' };
+async function deliver(conf, to, code, purpose) {
+  if (conf.dev) { devOutbox.set(to, code); return; }
+  const what = PURPOSE[purpose] || '';
+  const html = `<div dir="rtl" style="font-family:Tahoma,Arial,sans-serif;font-size:15px;line-height:1.8;color:#1b1f24">
+    <p>کد ${what} شما در باشگاه جارویس:</p>
+    <p style="font-size:30px;font-weight:bold;letter-spacing:6px;direction:ltr;text-align:center;background:#f2f4f7;border-radius:10px;padding:12px">${code}</p>
+    <p>این کد ${CODE_MIN} دقیقه اعتبار دارد. آن را به هیچ‌کس ندهید؛ جارویس هیچ‌وقت کد را از شما نمی‌پرسد.</p>
+    <p style="color:#667085;font-size:13px">اگر شما درخواست نکرده‌اید، این ایمیل را نادیده بگیرید.</p></div>`;
+  let r;
+  try {
+    r = await fetch('https://api.brevo.com/v3/smtp/email', { method: 'POST', headers: { 'api-key': conf.key, 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ sender: { email: conf.from, name: conf.name || 'JARVIS' }, to: [{ email: to }], subject: `کد ${what} جارویس: ${code}`, htmlContent: html, textContent: `کد ${what} شما در باشگاه جارویس: ${code}\nاین کد ${CODE_MIN} دقیقه اعتبار دارد. آن را به کسی ندهید.` }) });
+  } catch { fail(502, 'سرویس ایمیل در دسترس نیست؛ کمی بعد دوباره امتحان کنید'); }
+  if (!r.ok) { let m = ''; try { m = (await r.json()).message || ''; } catch {} fail(502, 'ایمیل کد فرستاده نشد' + (m ? ': ' + m.slice(0, 160) : '')); }
+}
+async function sendCode(db, env, conf, email, purpose, data, { resend = false } = {}) {
+  const k = purpose + ':' + email, t = Date.now();
+  const old = await db.prepare('SELECT sent, expires FROM codes WHERE k = ?').bind(k).first();
+  if (old && t - old.sent < RESEND_S * 1000) {
+    const wait = Math.ceil((RESEND_S * 1000 - (t - old.sent)) / 1000);
+    if (resend) fail(429, `کد همین الان فرستاده شد؛ ${wait.toLocaleString('fa-IR')} ثانیه‌ی دیگر دوباره بخواهید`);
+    // the same step again within a minute (e.g. «برگشت» and again): keep the code already sent
+    if (data) await db.prepare('UPDATE codes SET data = ? WHERE k = ?').bind(JSON.stringify(data), k).run();
+    return { needCode: true, email, purpose, expiresIn: Math.round((old.expires - t) / 1000), resendIn: wait };
+  }
+  await throttle(db, 'mail:' + email, 6, 36e5);
+  const code = newCode();
+  await db.prepare('INSERT OR REPLACE INTO codes (k, hash, data, expires, tries, sent) VALUES (?, ?, ?, ?, 0, ?)').bind(k, await sha(k + ':' + code), data ? JSON.stringify(data) : null, t + CODE_MIN * 6e4, t).run();
+  try { await deliver(conf, email, code, purpose); } catch (e) { await db.prepare('DELETE FROM codes WHERE k = ?').bind(k).run(); throw e; }
+  return { needCode: true, email, purpose, expiresIn: CODE_MIN * 60, resendIn: RESEND_S };
+}
+async function checkCode(db, email, purpose, code) {
+  const k = purpose + ':' + email, row = await db.prepare('SELECT * FROM codes WHERE k = ?').bind(k).first();
+  code = faDigits(code).replace(/\D/g, '');
+  if (!row || row.expires < Date.now()) { if (row) await db.prepare('DELETE FROM codes WHERE k = ?').bind(k).run(); fail(400, 'کد منقضی شده یا وجود ندارد؛ دوباره کد بخواهید'); }
+  if (row.tries >= CODE_TRIES) { await db.prepare('DELETE FROM codes WHERE k = ?').bind(k).run(); fail(429, 'چند بار اشتباه وارد شد؛ کد تازه بخواهید'); }
+  if (code.length !== 6 || !same(await sha(k + ':' + code), row.hash)) {
+    await db.prepare('UPDATE codes SET tries = tries + 1 WHERE k = ?').bind(k).run();
+    const left = CODE_TRIES - row.tries - 1;
+    fail(400, left > 0 ? `کد اشتباه است (${left.toLocaleString("fa-IR")} بار دیگر می‌توانید امتحان کنید)` : 'کد اشتباه است؛ کد تازه بخواهید');
+  }
+  await db.prepare('DELETE FROM codes WHERE k = ?').bind(k).run();
+  return row.data ? JSON.parse(row.data) : {};
+}
+
 // ---- sessions ----
 const publicUser = u => u && ({ id: u.id, email: u.email, name: u.name, phone: u.phone || '', role: u.role, status: u.status, created: u.created, lastSeen: u.last_seen || null });
 async function startSession(db, user, client) {
@@ -110,7 +172,7 @@ async function body(req) {
 const routes = [];
 const route = (method, pattern, fn) => routes.push({ method, re: new RegExp('^' + pattern.replace(/:(\w+)/g, '(?<$1>[\\w-]+)') + '$'), fn });
 
-route('GET', '/api/health', async () => ({ ok: true, name: 'jarvis-club', v: VERSION }));
+route('GET', '/api/health', async () => ({ ok: true, name: 'jarvis-club', v: VERSION, codes: true }));
 
 route('POST', '/api/register', async ({ db, b, env, req }) => {
   const email = normEmail(b.email);
@@ -120,12 +182,31 @@ route('POST', '/api/register', async ({ db, b, env, req }) => {
   const phone = normPhone(b.phone);
   await throttle(db, 'reg:' + (req.headers.get('cf-connecting-ip') || 'x'), 10, 36e5);
   if (await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first()) fail(409, 'با این ایمیل قبلاً ثبت‌نام شده؛ وارد شوید');
+  const data = { name, phone: phone || null, pass: await hashPass(pass), client: client(b.client) };
+  const conf = await mailConf(db, env);
+  if (!conf) {
+    // email not set up yet: only the admin can join (to set it up); everyone else waits
+    if (!admins(env).includes(email)) fail(503, 'ثبت‌نام هنوز باز نیست (ارسال کد ایمیلی راه‌اندازی نشده)؛ کمی بعد دوباره امتحان کنید');
+    return createUser(db, env, email, data);
+  }
+  return sendCode(db, env, conf, email, 'reg', data);
+});
+// the code from the email: only now is the account made
+route('POST', '/api/register/verify', async ({ db, b, env }) => {
+  const email = normEmail(b.email);
+  if (!okEmail(email)) fail(400, 'ایمیل درست نیست');
+  await throttle(db, 'verify:' + email, 20, 36e5);
+  const data = await checkCode(db, email, 'reg', b.code);
+  if (await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first()) fail(409, 'با این ایمیل قبلاً ثبت‌نام شده؛ وارد شوید');
+  return createUser(db, env, email, data);
+});
+async function createUser(db, env, email, data) {
   const isAdmin = admins(env).includes(email);
-  const u = { id: newId(), email, name, phone: phone || null, pass: await hashPass(pass), role: isAdmin ? 'admin' : 'user', status: 'active', created: Date.now() };
+  const u = { id: newId(), email, name: data.name, phone: data.phone || null, pass: data.pass, role: isAdmin ? 'admin' : 'user', status: 'active', created: Date.now() };
   await db.prepare('INSERT INTO users (id, email, name, phone, pass, role, status, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(u.id, u.email, u.name, u.phone, u.pass, u.role, u.status, u.created).run();
-  return startSession(db, u, client(b.client));
-});
+  return startSession(db, u, client(data.client));
+}
 const client = c => ['desktop', 'android', 'web'].includes(c) ? c : 'web';
 
 route('POST', '/api/login', async ({ db, b, env }) => {
@@ -136,8 +217,31 @@ route('POST', '/api/login', async ({ db, b, env }) => {
   if (!u || !(await checkPass(String(b.password || ''), u.pass))) fail(401, 'ایمیل یا رمز اشتباه است');
   if (u.status === 'blocked') fail(403, 'حساب شما مسدود شده است');
   await unthrottle(db, 'login:' + email);
-  if (admins(env).includes(email) && u.role !== 'admin') { await db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").bind(u.id).run(); u.role = 'admin'; }
-  return startSession(db, u, client(b.client));
+  const conf = await mailConf(db, env);
+  if (conf) return sendCode(db, env, conf, email, 'login', { client: client(b.client) }); // step 2: the code from the email
+  return finishLogin(db, env, u, client(b.client)); // email not set up yet: the password alone (nobody is locked out)
+});
+route('POST', '/api/login/verify', async ({ db, b, env }) => {
+  const email = normEmail(b.email);
+  if (!okEmail(email)) fail(400, 'ایمیل درست نیست');
+  await throttle(db, 'verify:' + email, 20, 36e5);
+  const data = await checkCode(db, email, 'login', b.code);
+  const u = await db.prepare('SELECT * FROM users WHERE email = ?').bind(email).first();
+  if (!u) fail(401, 'حساب پیدا نشد');
+  if (u.status === 'blocked') fail(403, 'حساب شما مسدود شده است');
+  return finishLogin(db, env, u, data.client);
+});
+async function finishLogin(db, env, u, cl) {
+  if (admins(env).includes(u.email) && u.role !== 'admin') { await db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").bind(u.id).run(); u.role = 'admin'; }
+  return startSession(db, u, client(cl));
+}
+// a new code for the same step (only after the first one: sign-up details / correct password are already in)
+route('POST', '/api/code/resend', async ({ db, b, env }) => {
+  const email = normEmail(b.email), purpose = b.purpose === 'login' ? 'login' : 'reg';
+  const row = await db.prepare('SELECT data FROM codes WHERE k = ?').bind(purpose + ':' + email).first();
+  if (!row) fail(400, 'دوباره از اول شروع کنید');
+  const conf = await mailConf(db, env); if (!conf) fail(503, 'ارسال ایمیل راه‌اندازی نشده');
+  return sendCode(db, env, conf, email, purpose, row.data ? JSON.parse(row.data) : null, { resend: true });
 });
 
 route('POST', '/api/logout', async ({ db, req }) => {
@@ -179,6 +283,32 @@ route('DELETE', '/api/me', async ({ db, req, b }) => {
   await removeUser(db, user.id);
   return { ok: true };
 });
+// ---- admin: the email service for the codes (Brevo) ----
+route('GET', '/api/admin/mail', async ({ db, req, env }) => {
+  await auth(db, req, { admin: true });
+  const c = await mailConf(db, env);
+  return { configured: !!(c && !c.dev), source: c ? c.source || 'dev' : null, from: c ? c.from : '', fromName: c ? c.name || '' : '', keyHint: c && c.key ? '…' + String(c.key).slice(-4) : '' };
+});
+route('PUT', '/api/admin/mail', async ({ db, req, env, b }) => {
+  await auth(db, req, { admin: true });
+  if (env.BREVO_API_KEY && env.MAIL_FROM) fail(400, 'ایمیل از تنظیمات Cloudflare (secret) می‌آید و این‌جا عوض نمی‌شود');
+  const old = await db.prepare("SELECT v FROM shop WHERE k = 'mail'").first();
+  const prev = old ? JSON.parse(old.v) : {};
+  if (b.clear) { await db.prepare("DELETE FROM shop WHERE k = 'mail'").run(); return { ok: true, configured: false }; }
+  const from = normEmail(b.from || prev.from);
+  if (!okEmail(from)) fail(400, 'ایمیل فرستنده درست نیست');
+  const key = String(b.apiKey || '').trim() || prev.key;
+  if (!key || !/^xkeysib-[\w-]{20,}$/.test(key)) fail(400, 'کلید API برِوو باید با xkeysib- شروع شود');
+  await db.prepare("INSERT OR REPLACE INTO shop (k, v) VALUES ('mail', ?)").bind(JSON.stringify({ key, from, name: text(b.fromName || prev.name || 'JARVIS', 60, 'نام فرستنده') })).run();
+  return { ok: true, configured: true, from, keyHint: '…' + key.slice(-4) };
+});
+route('POST', '/api/admin/mail/test', async ({ db, req, env }) => {
+  const { user } = await auth(db, req, { admin: true });
+  const c = await mailConf(db, env); if (!c) fail(400, 'اول کلید و ایمیل فرستنده را ذخیره کنید');
+  await deliver(c, user.email, newCode(), 'test');
+  return { ok: true, to: user.email };
+});
+
 async function removeUser(db, id) {
   await db.batch([
     db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id),

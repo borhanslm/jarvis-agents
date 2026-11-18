@@ -20,10 +20,16 @@ let W;
 test('club service', async t => {
   W = await import('../club/worker.js');
   W._reset();
-  const env = { DB: d1(), ADMIN_EMAIL: 'boss@example.com' };
-  const call = async (method, path, b, token, headers = {}) => {
+  const env = { DB: d1(), ADMIN_EMAIL: 'boss@example.com', DEV_MAIL: '1' };
+  const raw = async (method, path, b, token, headers = {}) => {
     const r = await W.handle(new Request('https://club.test' + path, { method, headers: { ...(b ? { 'content-type': 'application/json' } : {}), ...(token ? { authorization: 'Bearer ' + token } : {}), ...headers }, body: b ? JSON.stringify(b) : undefined }), env);
     return { status: r.status, d: await r.json(), cors: r.headers.get('access-control-allow-origin') };
+  };
+  // sign-up and login now end with an email code: take it from the dev outbox and confirm it
+  const call = async (method, path, b, token, headers) => {
+    const r = await raw(method, path, b, token, headers);
+    if (r.status === 200 && r.d.needCode) { env.DB.raw.exec('DELETE FROM throttle'); return raw('POST', path + '/verify', { email: r.d.email, code: W.devOutbox.get(r.d.email) }); }
+    return r;
   };
 
   await t.test('health + CORS', async () => {

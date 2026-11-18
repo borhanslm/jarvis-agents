@@ -26,6 +26,7 @@ function gate() {
   if (!need) { if (g) g.remove(); document.documentElement.classList.remove('club-locked'); return; }
   document.documentElement.classList.add('club-locked');
   if (!g) { g = document.createElement('div'); g.id = 'clubGate'; g.className = 'cg'; g.setAttribute('role', 'dialog'); g.setAttribute('aria-modal', 'true'); g.setAttribute('aria-labelledby', 'cgTitle'); document.body.appendChild(g); }
+  if (C.pending) return gateCode(g);
   const reg = C.gateMode === 'register';
   g.innerHTML = `<div class="cg-box">
     <img src="logo.svg" alt="" class="cg-logo" width="64" height="64">
@@ -53,13 +54,49 @@ function gate() {
     const err = g.querySelector('#cgErr'), go = g.querySelector('.cg-go');
     err.textContent = ''; go.disabled = true; go.textContent = 'لطفاً صبر کنید…';
     try {
-      C.st = reg ? await api('/club/register', { body: { name: v('cgName'), email: v('cgEmail'), phone: v('cgPhone'), password: v('cgPass') } })
+      const r = reg ? await api('/club/register', { body: { name: v('cgName'), email: v('cgEmail'), phone: v('cgPhone'), password: v('cgPass') } })
                  : await api('/club/login', { body: { email: v('cgEmail'), password: v('cgPass') } });
-      window.JARVIS_CLUB = C.st; gate(); toast('خوش آمدید، ' + (C.st.user ? C.st.user.name : ''));
+      if (r.pending) { C.pending = { ...r.pending, at: Date.now() }; gate(); return; } // step 2: the code from the email
+      C.st = r; window.JARVIS_CLUB = C.st; gate(); toast('خوش آمدید، ' + (C.st.user ? C.st.user.name : ''));
       if (window.rebuildRail) window.rebuildRail();
     } catch (x) { err.textContent = x.message; go.disabled = false; go.textContent = reg ? 'ساخت حساب و ورود' : 'ورود'; }
   };
   setTimeout(() => { const first = g.querySelector(reg ? '#cgName' : '#cgEmail'); if (first && !first.value) first.focus(); else g.querySelector('#cgPass').focus(); });
+}
+// step 2 of sign-up / login: the 6-digit code sent to the email
+function gateCode(g) {
+  const P = C.pending, login = P.purpose === 'login';
+  const left = () => Math.max(0, Math.ceil(((P.resendIn || 60) * 1000 - (Date.now() - P.at)) / 1000));
+  g.innerHTML = `<div class="cg-box">
+    <img src="logo.svg" alt="" class="cg-logo" width="64" height="64">
+    <h1 id="cgTitle">کد تأیید</h1>
+    <p class="help cg-sub">کد ۶ رقمی به <b dir="ltr">${esc(P.email)}</b> فرستاده شد. ${login ? 'برای ورود' : 'برای ساخت حساب'} آن را وارد کنید. اگر نیامد، پوشه‌ی «اسپم» را هم ببینید.</p>
+    <form id="cgCodeForm" class="cg-form" novalidate>
+      <div class="field"><label for="cgCode">کد</label><input id="cgCode" class="cg-code" inputmode="numeric" autocomplete="one-time-code" dir="ltr" maxlength="6" pattern="[0-9۰-۹]{6}" required placeholder="••••••"></div>
+      <div id="cgErr" class="bad" role="alert"></div>
+      <button type="submit" class="btn btn-primary cg-go">${login ? 'ورود' : 'ساخت حساب و ورود'}</button>
+    </form>
+    <div class="row-gap cg-code-actions"><button type="button" class="btn btn-sm ghost" id="cgResend"></button><button type="button" class="btn btn-sm ghost" id="cgBack">${ic('chevron-right', 'sm')}برگشت</button></div>
+    <p class="help cg-note">${ic('lock', 'sm')} کد ۱۰ دقیقه اعتبار دارد و فقط یک بار کار می‌کند. آن را به هیچ‌کس ندهید.</p>
+  </div>`;
+  const rs = g.querySelector('#cgResend'), err = g.querySelector('#cgErr'), go = g.querySelector('.cg-go'), inp = g.querySelector('#cgCode');
+  const tick = () => { if (!g.isConnected || C.pending !== P) return; const s = left(); rs.disabled = s > 0; rs.innerHTML = `${ic('refresh-cw', 'sm')}${s > 0 ? `ارسال دوباره (${s.toLocaleString('fa-IR')})` : 'ارسال دوباره‌ی کد'}`; if (s > 0) setTimeout(tick, 1000); };
+  tick();
+  rs.onclick = async () => { err.textContent = ''; try { const r = await api('/club/resend', { body: { email: P.email, purpose: P.purpose } }); C.pending = { ...r.pending, at: Date.now() }; gateCode(g); toast('کد تازه فرستاده شد'); } catch (x) { err.textContent = x.message; } };
+  g.querySelector('#cgBack').onclick = () => { C.pending = null; gate(); };
+  const submit = async () => {
+    const code = inp.value.replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/\D/g, '');
+    if (code.length !== 6) { err.textContent = 'کد ۶ رقم است'; return; }
+    err.textContent = ''; go.disabled = true; go.textContent = 'لطفاً صبر کنید…';
+    try {
+      C.st = await api('/club/verify', { body: { email: P.email, purpose: P.purpose, code } });
+      C.pending = null; window.JARVIS_CLUB = C.st; gate(); toast('خوش آمدید، ' + (C.st.user ? C.st.user.name : ''));
+      if (window.rebuildRail) window.rebuildRail();
+    } catch (x) { err.textContent = x.message; go.disabled = false; go.textContent = login ? 'ورود' : 'ساخت حساب و ورود'; inp.select(); }
+  };
+  g.querySelector('#cgCodeForm').onsubmit = e => { e.preventDefault(); submit(); };
+  inp.oninput = () => { const d = inp.value.replace(/[۰-۹]/g, x => '۰۱۲۳۴۵۶۷۸۹'.indexOf(x)).replace(/\D/g, ''); if (d.length === 6) submit(); }; // pasted or typed in full
+  setTimeout(() => inp.focus());
 }
 window.addEventListener('jarvis:ev', e => {
   const ev = e.detail; if (!ev || ev.type !== 'club') return;
@@ -171,6 +208,55 @@ async function tabMembers(el) {
   }).catch(() => {});
   let tmr; el.querySelector('#clQ').oninput = e => { clearTimeout(tmr); tmr = setTimeout(() => { C.q = e.target.value.trim(); loadUsers(el); }, 300); };
   loadUsers(el);
+  mailSettings(el);
+}
+// the email service for sign-up / login codes (Brevo). The key is kept in the club and never shown again.
+async function mailSettings(el) {
+  const box = document.createElement('section'); box.className = 'sl-card cl-mail'; el.appendChild(box);
+  const draw = m => {
+    box.innerHTML = `<h2>${ic('mail', 'sm')}ایمیل کد تأیید (Brevo)</h2>
+      <p class="help">ثبت‌نام با کد ایمیلی تأیید می‌شود و ورود بعد از رمز، یک کد ایمیلی هم می‌خواهد. ${m.configured ? `<span class="ok">${ic('circle-check', 'sm')} فعال است — فرستنده: <b dir="ltr">${esc(m.from)}</b>${m.keyHint ? ` · کلید <span dir="ltr">${esc(m.keyHint)}</span>` : ''}</span>` : `<span class="bad">${ic('triangle-alert', 'sm')} هنوز تنظیم نشده: تا آن موقع ورود فقط با رمز است و فقط ایمیل مدیر می‌تواند ثبت‌نام کند.</span>`}</p>
+      ${m.source === 'env' ? '<p class="help">این تنظیم از Cloudflare (secret) می‌آید و این‌جا عوض نمی‌شود.</p>' : `
+      <ol class="help cl-steps"><li>در <a href="https://www.brevo.com" target="_blank" rel="noopener" dir="ltr">brevo.com</a> حساب رایگان بسازید (روزی ۳۰۰ ایمیل).</li>
+        <li>در Brevo بخش <b dir="ltr">Senders, Domains &amp; Dedicated IPs → Senders</b> ایمیل فرستنده را اضافه و تأیید کنید.</li>
+        <li>در <b dir="ltr">SMTP &amp; API → API Keys</b> یک کلید بسازید (با <span dir="ltr">xkeysib-</span> شروع می‌شود) و این‌جا بچسبانید.</li></ol>
+      <form id="clMailF" class="cl-form" autocomplete="off">
+        <div class="field"><label for="clMk">کلید API برِوو ${m.configured ? '<span class="help">(خالی بگذارید تا همان قبلی بماند)</span>' : ''}</label><input id="clMk" type="password" dir="ltr" autocomplete="off" placeholder="xkeysib-…"></div>
+        <div class="field"><label for="clMf">ایمیل فرستنده (تأییدشده در Brevo)</label><input id="clMf" type="email" dir="ltr" value="${esc(m.from || '')}"></div>
+        <div class="field"><label for="clMn">نام فرستنده</label><input id="clMn" value="${esc(m.fromName || 'JARVIS')}"></div>
+        <div class="row-gap"><button class="btn btn-sm btn-primary">${ic('save', 'sm')}ذخیره</button>
+          ${m.configured ? `<button type="button" class="btn btn-sm" id="clMt">${ic('send', 'sm')}ایمیل آزمایشی به خودم</button><button type="button" class="btn btn-sm ghost danger" id="clMx">${ic('trash-2', 'sm')}حذف</button>` : ''}</div></form>`}`;
+    const f = box.querySelector('#clMailF');
+    if (f) f.onsubmit = async e => { e.preventDefault(); try { await call('PUT', '/api/admin/mail', { apiKey: box.querySelector('#clMk').value.trim(), from: box.querySelector('#clMf').value.trim(), fromName: box.querySelector('#clMn').value.trim() }); toast('ذخیره شد؛ از این به بعد کد ایمیلی لازم است'); load(); } catch (x) { toast(x.message, true); } };
+    const t = box.querySelector('#clMt'); if (t) t.onclick = async () => { t.disabled = true; try { const r = await call('POST', '/api/admin/mail/test', {}); toast('ایمیل آزمایشی به ' + r.to + ' فرستاده شد'); } catch (x) { toast(x.message, true); } t.disabled = false; };
+    const x = box.querySelector('#clMx'); if (x) x.onclick = async () => { if (!confirm('تنظیم ایمیل حذف شود؟ بعد از آن ورود فقط با رمز است و فقط مدیر می‌تواند ثبت‌نام کند.')) return; try { await call('PUT', '/api/admin/mail', { clear: true }); load(); } catch (y) { toast(y.message, true); } };
+  };
+  const redeploy = `<div class="cl-redeploy"><button type="button" class="btn btn-sm" id="clRe">${ic('upload', 'sm')}انتشار نسخه‌ی تازه‌ی باشگاه در Cloudflare</button><span class="help" id="clReS">کد سرویس باشگاه را با همین نسخه‌ی جارویس به‌روز می‌کند (اعضا و داده‌ها می‌مانند).</span></div>`;
+  const wireRe = () => {
+    const b = box.querySelector('#clRe'); if (!b) return;
+    b.onclick = async () => {
+      const s = box.querySelector('#clReS');
+      b.disabled = true; s.textContent = 'در حال انتشار… (یکی دو دقیقه)';
+      try {
+        await api('/club/deploy', { body: {} });
+        for (let i = 0; i < 120; i++) {
+          await new Promise(r => setTimeout(r, 3000));
+          const d = ((await api('/club')) || {}).deploy;
+          if (d && !d.running) {
+            if (d.error) { s.innerHTML = `<span class="bad">${esc(d.error)}${d.needLogin ? ' — از «باشگاه» خارج نشوید؛ در صفحه‌ی راه‌اندازی «ورود به Cloudflare» را بزنید.' : ''}</span>`; b.disabled = false; return; }
+            s.innerHTML = `<span class="ok">${ic('circle-check', 'sm')} منتشر شد.</span>`; b.disabled = false; return load();
+          }
+          if (d && d.log && d.log.length) s.textContent = d.log[d.log.length - 1];
+        }
+      } catch (x) { s.innerHTML = `<span class="bad">${esc(x.message)}</span>`; b.disabled = false; }
+    };
+  };
+  const load = async () => {
+    try { draw(await call('GET', '/api/admin/mail')); box.insertAdjacentHTML('beforeend', redeploy); }
+    catch (e) { box.innerHTML = `<h2>${ic('mail', 'sm')}ایمیل کد تأیید</h2><p class="help bad">${e.status === 404 ? 'سرویس باشگاه شما هنوز نسخه‌ی قدیمی است و کد ایمیلی ندارد. یک بار آن را منتشر کنید:' : esc(e.message)}</p>${redeploy}`; }
+    wireRe();
+  };
+  load();
 }
 async function loadUsers(el) {
   let r; try { r = await call('GET', '/api/admin/users?q=' + encodeURIComponent(C.q)); } catch (x) { el.querySelector('#clUsers').innerHTML = `<tr><td colspan="8" class="bad">${esc(x.message)}</td></tr>`; return; }
